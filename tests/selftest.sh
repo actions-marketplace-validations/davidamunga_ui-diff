@@ -82,6 +82,15 @@ check "next + pnpm"  test "$(node "$S/devcmd.cjs" "$TMP/dc/next")" = "pnpm run d
 check "static html"  test "$(node "$S/devcmd.cjs" "$TMP/dc/static")" = "python3 -m http.server {port}"
 check "nothing to run → error" bash -c "! node '$S/devcmd.cjs' '$TMP/dc/none'"
 
+section "unit: dependency linking in a monorepo (linkdeps.cjs)"
+# src: an app whose node_modules holds a registry package and a workspace link (@acme/ui -> packages/ui).
+for r in src dst; do mkdir -p "$TMP/ld/$r/apps/web" "$TMP/ld/$r/packages/ui"; echo "$r" > "$TMP/ld/$r/packages/ui/index.js"; done
+mkdir -p "$TMP/ld/src/apps/web/node_modules/@acme" "$TMP/ld/src/apps/web/node_modules/react"
+ln -s ../../../../packages/ui "$TMP/ld/src/apps/web/node_modules/@acme/ui"
+node "$S/linkdeps.cjs" "$TMP/ld/src" "$TMP/ld/dst" >/dev/null
+check "workspace package resolves to the worktree's own source" test "$(cat "$TMP/ld/dst/apps/web/node_modules/@acme/ui/index.js")" = dst
+check "registry packages are shared with the checkout" test "$(cd "$TMP/ld/dst/apps/web/node_modules/react" && pwd -P)" = "$(cd "$TMP/ld/src/apps/web/node_modules/react" && pwd -P)"
+
 # ---------------------------------------------------------------------------------
 section "e2e: static site — style changes, new page, unchanged page"
 REPO="$TMP/static"

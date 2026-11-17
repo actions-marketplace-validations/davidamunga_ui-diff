@@ -27,6 +27,31 @@ function findNodeModules(dir, rel, depth, out) {
   return out;
 }
 
+const realSrc = fs.realpathSync(src);
+
+// Workspace packages (pnpm/npm/yarn workspaces) are symlinks into the repo's own source,
+// e.g. node_modules/@acme/ui -> ../../packages/ui. Point those at <dst>'s copy, or both
+// worktrees would render <src>'s version of the shared package.
+function workspaceTarget(entry) {
+  let real;
+  try { real = fs.realpathSync(entry); } catch { return null; }
+  const rel = path.relative(realSrc, real);
+  if (rel.startsWith('..') || path.isAbsolute(rel) || rel.split(path.sep).includes('node_modules')) return null;
+  const target = path.join(dst, rel);
+  return fs.existsSync(target) ? target : null;
+}
+
+function linkEntry(from, to) {
+  const st = fs.lstatSync(from);
+  // Scope folders (@acme) are real directories holding package links; mirror them one level down.
+  if (path.basename(from).startsWith('@') && st.isDirectory()) {
+    fs.mkdirSync(to);
+    for (const name of fs.readdirSync(from)) linkEntry(path.join(from, name), path.join(to, name));
+    return;
+  }
+  fs.symlinkSync((st.isSymbolicLink() && workspaceTarget(from)) || from, to);
+}
+
 let linked = 0;
 for (const rel of findNodeModules(src, '', 0, [])) {
   const dstPkg = path.join(dst, rel);
@@ -37,7 +62,7 @@ for (const rel of findNodeModules(src, '', 0, [])) {
   fs.mkdirSync(to);
   for (const name of fs.readdirSync(from)) {
     if (CACHE_DIRS.has(name)) continue;
-    fs.symlinkSync(path.join(from, name), path.join(to, name));
+    linkEntry(path.join(from, name), path.join(to, name));
   }
   linked++;
 }

@@ -1,0 +1,34 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ui-diff
+            ~/.cache/ms-playwright
+            ~/Library/Caches/ms-playwright
+          key: ui-diff-tools-${{ runner.os }}-${{ hashFiles('skills/ui-diff/scripts/setup.sh') }}
+      - name: Install tools
+        run: bash skills/ui-diff/scripts/setup.sh
+      # System libraries aren't in the cache, so install them on every Linux run.
+      - name: Chromium system deps
+        if: runner.os == 'Linux'
+        run: cd ~/.cache/ui-diff && npx playwright install-deps chromium
+      - name: Self-test
+        run: bash tests/selftest.sh --full

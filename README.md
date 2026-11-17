@@ -1,7 +1,11 @@
 # ui-diff
 
+[![test](https://github.com/davidamunga/ui-diff/actions/workflows/test.yml/badge.svg)](https://github.com/davidamunga/ui-diff/actions/workflows/test.yml)
+
 An agent skill that shows reviewers what a pull request **looks like**, not just what
 its code is.
+
+<img src="docs/demo.png" alt="A ui-diff comment on a pull request: a written summary of the design changes, then before/after crops showing the buttons turning from blue rectangles into violet pills" width="720">
 
 Run it on a branch and your agent will:
 
@@ -27,7 +31,7 @@ GitHub Copilot, OpenCode, Goose, Windsurf, Amp, Cline, Roo Code and Kiro.
 
 **Every agent on your machine**, with the installer in this repo:
 ```bash
-git clone git@github.com:davidamunga/ui-diff.git && cd ui-diff
+git clone https://github.com/davidamunga/ui-diff.git && cd ui-diff
 ./install.sh                    # links the skill into each detected agent's skills folder
 ./install.sh --list             # show agents, paths, and what's installed
 ./install.sh --agents codex,cursor

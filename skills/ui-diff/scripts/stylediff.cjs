@@ -54,7 +54,9 @@ function styleView(st) {
   v.padding = four('padding');
   v.margin = four('margin');
   v['border-width'] = four('border', '-width');
-  if (v['border-width'] === '0px') { delete v['border-top-color']; delete v['border-top-style']; }
+  // Only the top side's color/style is snapshotted; report it as the shorthand.
+  for (const k of ['color', 'style']) { v[`border-${k}`] = v[`border-top-${k}`]; delete v[`border-top-${k}`]; }
+  if (v['border-width'] === '0px') { delete v['border-color']; delete v['border-style']; }
   return v;
 }
 
@@ -111,7 +113,7 @@ function compare(b, a) {
     const [ax, ay, aw, ah] = y.box;
     if (Math.abs(aw - bw) >= 3 || Math.abs(ah - bh) >= 3) {
       // Containers that only grew/shrank to fit their children are counted, not listed.
-      if (styled || y.text || y.ident) resizes.push({ el: label(y), from: `${bw}×${bh}`, to: `${aw}×${ah}`, mag: Math.abs(aw - bw) + Math.abs(ah - bh) });
+      if (styled || y.text || y.ident) resizes.push({ el: label(y), from: `${bw}×${bh}`, to: `${aw}×${ah}`, dw: aw - bw, dh: ah - bh, mag: Math.abs(aw - bw) + Math.abs(ah - bh) });
       else containersResized++;
     } else if (!styled && (Math.abs(ax - bx) >= 2 || Math.abs(ay - by) >= 2)) {
       const k = `${ax - bx},${ay - by}`;
@@ -145,15 +147,18 @@ function compare(b, a) {
   };
 }
 
-// Identical resize lines (three buttons growing the same way) become one line with a count.
+// Elements that resized by the same amount (a card's contents all narrowing by 10px when its
+// padding grows) become one line with a count; a lone resize keeps its exact sizes.
 function collapse(resizes) {
   const m = new Map();
-  for (const { mag, ...r } of resizes) {
-    const k = `${r.el}|${r.from}|${r.to}`;
-    if (m.has(k)) m.get(k).times++;
-    else m.set(k, { ...r, times: 1 });
+  for (const { mag, dw, dh, ...r } of resizes) {
+    const k = `${dw},${dh}`;
+    if (!m.has(k)) m.set(k, { ...r, dw, dh, count: 0, els: [] });
+    const g = m.get(k);
+    g.count++;
+    if (!g.els.includes(r.el)) g.els.push(r.el);
   }
-  return [...m.values()];
+  return [...m.values()].map((g) => ({ ...g, els: g.els.slice(0, 3) }));
 }
 
 // Contrast failures on a page that only exists on head.
@@ -177,7 +182,11 @@ function lines(m) {
     out.push(`\`${g.prop}\`: ${g.from} → ${g.to} — ${g.count} el (${g.els.join(', ')}${g.count > g.els.length ? ', …' : ''})`);
   }
   if (m.styles.length > MAX_LINES) out.push(`…and ${m.styles.length - MAX_LINES} more style changes`);
-  for (const r of m.resizes) out.push(`resized: ${r.el}${r.times > 1 ? ` ×${r.times}` : ''} ${r.from} → ${r.to}`);
+  const delta = (n, dim) => n && `${n > 0 ? '+' : ''}${n}px ${dim}`;
+  for (const r of m.resizes) {
+    if (r.count === 1) out.push(`resized: ${r.el} ${r.from} → ${r.to}`);
+    else out.push(`resized ${[delta(r.dw, 'wide'), delta(r.dh, 'tall')].filter(Boolean).join(', ')}: ${r.count} el (${r.els.join(', ')}${r.count > r.els.length ? ', …' : ''})`);
+  }
   if (m.containersResized) out.push(`${m.containersResized} container(s) resized to fit their content`);
   for (const mv of m.moves.slice(0, 5)) {
     const dir = [mv.dy && `${mv.dy > 0 ? '+' : ''}${mv.dy}px vertically`, mv.dx && `${mv.dx > 0 ? '+' : ''}${mv.dx}px horizontally`].filter(Boolean).join(', ');

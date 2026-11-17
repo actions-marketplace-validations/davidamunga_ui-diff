@@ -12,7 +12,8 @@ if [ ! -f "$TOOLS_DIR/node_modules/.ui-diff-ok" ]; then
   cd "$TOOLS_DIR"
   [ -f package.json ] || echo '{"name":"ui-diff-tools","private":true}' > package.json
   npm install --silent --no-audit --no-fund playwright@^1 pixelmatch@5.3.0 pngjs@7 >&2
-  npx --yes playwright install chromium >&2
+  # UI_DIFF_WITH_DEPS=1 also installs the system libraries Chromium needs (CI, fresh Linux; uses sudo).
+  npx --yes playwright install ${UI_DIFF_WITH_DEPS:+--with-deps} chromium >&2
   touch node_modules/.ui-diff-ok
 fi
 
