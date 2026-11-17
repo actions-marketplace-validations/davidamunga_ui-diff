@@ -84,7 +84,17 @@ add_worktree() {
 # Untracked files the app needs (env files, config.copyFiles) aren't part of a worktree.
 copy_untracked() {
   local dst="$1" f
-  { find . -maxdepth 4 \( -name node_modules -o -name .git -o -name .ui-diff \) -prune -o -name '.env*' -type f -print; cfg copyFiles; } |
+  # copyFiles entries may be files or directories (a directory is copied recursively, skipping
+  # node_modules, .git and .ui-diff), e.g. a gitignored generated API client.
+  { find . -maxdepth 4 \( -name node_modules -o -name .git -o -name .ui-diff \) -prune -o -name '.env*' -type f -print
+    cfg copyFiles | while read -r f; do
+      f="${f#./}"; f="${f%/}"
+      if [ -d "$f" ]; then
+        find "$f" \( -name node_modules -o -name .git -o -name .ui-diff \) -prune -o -type f -print
+      else
+        echo "$f"
+      fi
+    done; } |
     sed 's#^\./##' | sort -u | while read -r f; do
       [ -n "$f" ] && [ -f "$f" ] || continue
       git ls-files --error-unmatch "$f" >/dev/null 2>&1 && continue

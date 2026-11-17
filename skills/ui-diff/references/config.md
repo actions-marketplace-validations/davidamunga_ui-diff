@@ -32,7 +32,7 @@ Saves what you'd otherwise rediscover every run. Everything is optional.
 | `devCommand` | Starts the app. `{port}` is replaced with a free port; `PORT` is also set in the env. Auto-detected from `package.json` when absent. |
 | `install` | Install command for the base worktree when its lockfile differs from head's. |
 | `readyPath` | Polled until it answers before capturing. |
-| `copyFiles` | Extra untracked files to copy into the worktrees (untracked `.env*` files are copied automatically). |
+| `copyFiles` | Extra untracked files or directories to copy into the worktrees, relative to the repo root (untracked `.env*` files are copied automatically). A directory is copied recursively, skipping `node_modules`, `.git` and `.ui-diff`; use it for gitignored generated code the dev server needs, such as an API client. |
 | `routes` | Always-captured routes, on top of the ones inferred from the diff. Give a unique `name` when the same path appears twice (e.g. with different `actions`). |
 | `actions` | Steps before the screenshot: `{click}`, `{hover}`, `{fill: [sel, value]}`, `{press: key}`, `{wait: ms or selector}`. |
 | `viewports` | Name → `{width, height}` for a desktop window, or `{device: "<Playwright device>"}` (e.g. `"iPhone 13"`, `"Pixel 7"`, `"iPad Mini"`) for real mobile emulation: touch, mobile UA, `isMobile`. |
