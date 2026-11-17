@@ -113,6 +113,8 @@ Guidelines:
 - Say "changed", not "intentionally changed". You can see what changed, not why.
 - Keep it proportional. A one-color tweak gets one bullet.
 
+Then run `node $SKILL/scripts/viewer.cjs --report .ui-diff/report` to refresh the local review page (`report/index.html`: slider, side by side, diff overlay, summary on top) and offer to open it for the user (`open` on macOS, `xdg-open` on Linux).
+
 ## 5. Publish
 
 Posting writes to a shared PR and pushes a branch. **Show the user the summary and confirm

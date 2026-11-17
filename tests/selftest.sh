@@ -120,6 +120,29 @@ check "temporary worktree removed" no_extra_worktrees "$REPO"
 check "working tree untouched" tree_clean "$REPO"
 check ".ui-diff/ ignored locally" grep -qxF '.ui-diff/' "$REPO/.git/info/exclude"
 
+section "e2e: local review page (viewer.cjs)"
+check "run.sh prints the review page path" grep -qF "$R/index.html" "$TMP/static.err"
+expect "$R/index.html" 'has(d, "<title>UI diff</title>") && !/<(script|link)[^>]+(src|href)="(https?:)?\/\//.test(d)' "self-contained (no external scripts or styles)"
+node -e '
+const fs = require("fs"), path = require("path"), r = process.argv[1];
+const html = fs.readFileSync(path.join(r, "index.html"), "utf8");
+const srcs = [...html.matchAll(/<img src="([^"]+)"/g)].map((m) => m[1]);
+if (!srcs.length || srcs.some((s) => /^(\/|https?:)/.test(s) || !fs.existsSync(path.join(r, s)))) process.exit(1);
+' "$R"
+check "every image is a relative path that exists" test $? = 0
+node -e '
+const fs = require("fs"), path = require("path"), r = process.argv[1];
+const html = fs.readFileSync(path.join(r, "index.html"), "utf8");
+const changed = require(path.join(r, "results.json")).items.filter((i) => i.status === "changed");
+if (!changed.length || changed.some((i) => !html.includes(`data-file="${i.file}"`) || !html.includes(`diff/${i.file}`))) process.exit(1);
+' "$R"
+check "includes every changed item (with its diff image)" test $? = 0
+expect "$R/index.html" 'has(d, "after/new-html__desktop.png") && has(d, "No visual change (2)") && has(d, "class=\"stage\"")' "new page, unchanged list and slider present"
+printf '**What changed**\n- Buttons got `rounder`\n' > "$R/summary.md"
+node "$S/viewer.cjs" --report "$R" > /dev/null
+expect "$R/index.html" 'has(d, "<strong>What changed</strong>") && has(d, "<code>rounder</code>")' "summary.md rendered at the top"
+rm -f "$R/summary.md"
+
 section "e2e: comment rendering"
 node "$S/comment.cjs" --report "$R" --base-url "https://github.com/acme/demo/blob/ui-diff-assets/pr-1/abc1234" --out "$TMP/comment.md"
 expect "$TMP/comment.md" 'd.startsWith("<!-- ui-diff:start -->") && d.trim().endsWith("<!-- ui-diff:end -->")' "wrapped in markers"
