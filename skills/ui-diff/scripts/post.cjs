@@ -54,7 +54,7 @@ if (mode === 'comment') {
   } else {
     const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ui-diff-')), 'body.md');
     fs.writeFileSync(tmp, next);
-    gh('pr', 'edit', String(a.pr), '--body-file', tmp);
-    console.log(gh('pr', 'view', String(a.pr), '--json', 'url', '-q', '.url'));
+    // REST rather than `gh pr edit`, which needs extra scopes (projects) that CI tokens lack.
+    console.log(gh('api', '-X', 'PATCH', `repos/{owner}/{repo}/pulls/${a.pr}`, '-F', `body=@${tmp}`, '--jq', '.html_url'));
   }
 }

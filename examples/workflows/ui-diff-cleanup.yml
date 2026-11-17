@@ -1,0 +1,19 @@
+# Copy to .github/workflows/ui-diff-cleanup.yml. Removes a PR's screenshots from the
+# ui-diff-assets branch once it's merged or closed. (Its ui-diff comment then shows
+# broken images.) No checkout needed.
+name: UI diff cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write   # rewrite the ui-diff-assets branch
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: davidamunga/ui-diff@v0
+        with:
+          mode: prune

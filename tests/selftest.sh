@@ -130,6 +130,102 @@ check "keeps earlier PRs' images" git --git-dir="$TMP/remote.git" cat-file -e "u
 check "adds the new PR's images" git --git-dir="$TMP/remote.git" cat-file -e "ui-diff-assets:pr-2/def5678/diff/pricing-html__desktop.png"
 check "user's branch untouched" test "$(git -C "$REPO" branch --show-current)" = feature
 
+section "e2e: pruning the assets branch (prune.sh)"
+assets_sha() { git --git-dir="$TMP/remote.git" rev-parse ui-diff-assets; }
+(cd "$REPO" && UI_DIFF_REPO=acme/demo bash "$S/prune.sh" 1 >/dev/null 2>&1)
+check "prune.sh exits 0" test $? = 0
+check "removes the closed PR's images" bash -c "! git --git-dir='$TMP/remote.git' cat-file -e ui-diff-assets:pr-1"
+check "keeps other PRs' images" git --git-dir="$TMP/remote.git" cat-file -e "ui-diff-assets:pr-2/def5678/diff/pricing-html__desktop.png"
+check "branch stays a single commit" test "$(git --git-dir="$TMP/remote.git" rev-list --count ui-diff-assets)" = 1
+BEFORE="$(assets_sha)"
+(cd "$REPO" && UI_DIFF_REPO=acme/demo bash "$S/prune.sh" 99 >/dev/null 2>&1)
+check "PR with no images → exits 0 without pushing" test $? = 0 -a "$(assets_sha)" = "$BEFORE"
+(cd "$REPO" && UI_DIFF_REPO=acme/demo UI_DIFF_BRANCH=no-such-branch bash "$S/prune.sh" 2 >/dev/null 2>&1)
+check "no assets branch → exits 0" test $? = 0
+(cd "$TMP" && UI_DIFF_REPO=acme/demo UI_DIFF_REMOTE="$TMP/remote.git" bash "$S/prune.sh" 2 >/dev/null 2>&1)
+check "works outside a checkout with UI_DIFF_REMOTE" bash -c "! git --git-dir='$TMP/remote.git' cat-file -e ui-diff-assets:pr-2"
+
+section "unit: automatic summary (comment.cjs --auto-summary)"
+node "$S/comment.cjs" --report "$R" --auto-summary --out "$TMP/auto.md"
+expect "$TMP/auto.md" 'has(d, "Automatic summary") && has(d, "**What changed**")' "labelled as automatic"
+expect "$TMP/auto.md" 'has(d, "`/pricing.html` (desktop, mobile) — ") && has(d, "text change")' "one line per route across viewports, with measured facts"
+expect "$TMP/auto.md" 'has(d, "🆕 `/new.html` — new page (desktop, mobile)") && !has(d.split("<sub>**")[0], "HTTP 404")' "new page (its base 404 isn't flagged)"
+expect "$TMP/auto.md" 'has(d, "**Worth a look**") && has(d, "contrast 2.54:1") && has(d, "(was 5.17:1)")' "new contrast failures under worth a look"
+expect "$TMP/auto.md" 'd.split("<sub>**")[0].split("contrast 2.54:1").length === 2 && has(d, "— `/`, `/pricing.html` (desktop, mobile)")' "a shared-header issue is one line across pages"
+expect "$TMP/auto.md" 'has(d, "contrast 1.92:1 (needs 4.5:1), #bbbbbb on #ffffff: p \"Faint helper text\"")' "new-page contrast is listed too"
+expect "$TMP/auto.md" '!has(d, "/about.html` (")' "unchanged pages aren't listed as changed"
+echo "**Hand-written**" > "$TMP/summary.md"
+node "$S/comment.cjs" --report "$R" --auto-summary --summary "$TMP/summary.md" --out "$TMP/both.md"
+expect "$TMP/both.md" 'has(d, "Hand-written") && !has(d, "Automatic summary")' "--summary wins over --auto-summary"
+
+section "unit: description mode uses the REST API (post.cjs, stub gh)"
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+# Stand-in for gh: logs each call; answers as if the PR has no ui-diff comment yet.
+echo "$*" >> "$GH_LOG"
+for a in "$@"; do case "$a" in body=@*) cp "${a#body=@}" "$GH_LOG.body" ;; esac; done
+case "$*" in
+  *--paginate*) ;;
+  "pr view"*) echo "Original PR text" ;;
+  "pr comment"*) echo "https://github.com/acme/demo/pull/$3#issuecomment-1" ;;
+  *PATCH*) echo "https://github.com/acme/demo/pull/7" ;;
+esac
+EOF
+chmod +x "$TMP/bin/gh"
+export GH_LOG="$TMP/gh.log"
+PATH="$TMP/bin:$PATH" node "$S/post.cjs" --pr 7 --body "$TMP/comment.md" --mode description > "$TMP/post.out"
+check "post.cjs exits 0" test $? = 0
+expect "$GH_LOG" 'has(d, "api -X PATCH repos/{owner}/{repo}/pulls/7")' "edits the description via REST"
+expect "$GH_LOG.body" 'd.startsWith("Original PR text\n\n---\n\n<!-- ui-diff:start -->")' "keeps the existing description"
+
+section "e2e: GitHub Action (action/ci.sh) with a fake PR event, shallow checkout, stub gh"
+git -C "$REPO" push -q origin main feature
+git clone -q --depth 1 --branch feature "file://$TMP/remote.git" "$TMP/ci"
+BASE_SHA="$(git -C "$REPO" rev-parse main)" HEAD_SHA="$(git -C "$REPO" rev-parse feature)"
+event() { # event <action> <head repo>
+  printf '{"action":"%s","number":7,"pull_request":{"number":7,"base":{"sha":"%s"},"head":{"sha":"%s","repo":{"full_name":"%s"}}}}' \
+    "$1" "$BASE_SHA" "$HEAD_SHA" "$2" > "$TMP/event.json"
+}
+ci() { # ci <stderr file> [VAR=value...]
+  local err="$1"; shift
+  (cd "$TMP/ci" && env PATH="$TMP/bin:$PATH" GITHUB_EVENT_NAME=pull_request GITHUB_EVENT_PATH="$TMP/event.json" \
+    GITHUB_REPOSITORY=acme/demo GITHUB_OUTPUT="$TMP/gh-output" GITHUB_STEP_SUMMARY="$TMP/gh-summary" \
+    UI_DIFF_REMOTE="file://$TMP/remote.git" GH_TOKEN=dummy UI_DIFF_VIEWPORTS="desktop:1280x800" "$@" \
+    bash "$HERE/../action/ci.sh" > "$err.out" 2> "$err")
+}
+: > "$GH_LOG"
+event synchronize acme/demo
+ci "$TMP/ci.err" UI_DIFF_ROUTES="/,/pricing.html"
+check "ci.sh exits 0" test $? = 0
+check "unshallowed the checkout to find the merge-base" test "$(git -C "$TMP/ci" rev-parse --is-shallow-repository)" = false
+expect "$TMP/gh-output" 'has(d, "skipped=false") && has(d, "changed=2") && has(d, "errors=0")' "sets counts as outputs"
+expect "$TMP/gh-output" 'has(d, "comment-url=https://github.com/acme/demo/pull/7#issuecomment-1")' "sets the comment URL output"
+check "published PR #7's images at the head sha" git --git-dir="$TMP/remote.git" cat-file -e "ui-diff-assets:pr-7/${HEAD_SHA:0:7}/diff/pricing-html__desktop.png"
+expect "$GH_LOG" 'has(d, "pr comment 7 --body-file")' "posts the comment"
+expect "$TMP/ci/.ui-diff/comment.md" 'has(d, "Automatic summary") && has(d, "acme/demo/blob/ui-diff-assets/pr-7/")' "comment has the automatic summary and published images"
+expect "$TMP/ci.err.out" 'has(d, "::add-mask::")' "masks the git auth header"
+
+: > "$GH_LOG"
+event synchronize someone/fork
+ci "$TMP/ci-fork.err" UI_DIFF_ROUTES="/"
+check "fork PR → exits 0" test $? = 0
+expect "$TMP/ci-fork.err" 'has(d, "comes from a fork") && has(d, "skipping")' "explains why it skipped"
+expect "$TMP/gh-output" 'has(d, "skipped=true")' "sets skipped=true"
+check "fork PR → no gh calls" test ! -s "$GH_LOG"
+
+event synchronize acme/demo
+ci "$TMP/ci-noroutes.err"
+check "no routes and no .ui-diff.json → fails" test $? != 0
+expect "$TMP/ci-noroutes.err" 'has(d, "no routes to capture") && has(d, "routes")' "says how to give routes"
+ci "$TMP/ci-badmode.err" UI_DIFF_MODE=bogus
+check "unknown mode → fails" test $? != 0
+
+event closed acme/demo
+ci "$TMP/ci-closed.err"
+check "closed PR → exits 0 (prunes, no routes needed)" test $? = 0
+check "closed PR's images removed" bash -c "! git --git-dir='$TMP/remote.git' cat-file -e ui-diff-assets:pr-7"
+
 # ---------------------------------------------------------------------------------
 section "e2e: non-visual change → no false positives (determinism)"
 cd "$REPO"

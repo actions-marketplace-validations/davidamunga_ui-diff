@@ -143,4 +143,5 @@ node $SKILL/scripts/post.cjs --pr <pr> --body .ui-diff/comment.md --mode comment
 
 Report back with the link, the counts, and the "worth a look" items. If you worked out the
 dev command, routes, masks or dynamic ids yourself, offer to save them to `.ui-diff.json`
-so the next run is a single step.
+so the next run is a single step. Once a PR is merged or closed, `bash $SKILL/scripts/prune.sh <pr>`
+removes its images from the assets branch (ask first if anyone might still need its comment).
