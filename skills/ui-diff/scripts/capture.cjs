@@ -94,6 +94,7 @@ function snapshotStyles() {
     'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
     'border-top-color', 'border-top-style', 'border-radius', 'box-shadow', 'opacity',
     'display', 'flex-direction', 'justify-content', 'align-items', 'gap', 'grid-template-columns',
+    'max-width', 'min-width', 'max-height', 'min-height',
   ];
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'LINK', 'META', 'BR']);
   const MAX = 4000;

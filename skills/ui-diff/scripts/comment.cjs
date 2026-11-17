@@ -69,7 +69,7 @@ function autoSummary() {
     const changed = of('changed');
     if (changed.length) {
       const styles = new Map();
-      let copy = 0, added = 0, removed = 0, shift = 0, pct = 0;
+      let copy = 0, added = 0, removed = 0, shift = 0, pct = 0, resize = null;
       for (const i of changed) {
         pct = Math.max(pct, i.percent || 0);
         const m = i.measured;
@@ -79,6 +79,7 @@ function autoSummary() {
         added = Math.max(added, m.addedCount);
         removed = Math.max(removed, m.removedCount);
         if (m.moves.length) shift = Math.max(shift, Math.abs(m.moves[0].dy) || Math.abs(m.moves[0].dx));
+        if (!resize && m.resizes && m.resizes.length) resize = m.resizes[0];
       }
       const g = [...styles.values()];
       const facts = g.slice(0, 3).map((x) => `\`${x.prop}\` ${x.from} → ${x.to}`);
@@ -87,6 +88,8 @@ function autoSummary() {
       if (added) facts.push(`${added} element${added > 1 ? 's' : ''} added`);
       if (removed) facts.push(`${removed} element${removed > 1 ? 's' : ''} removed`);
       if (shift) facts.push(`content shifted by up to ${shift}px`);
+      // A size change with no tracked style change (e.g. max-width, flex/grid sizing).
+      if (!g.length && resize) facts.push(resize.count > 1 ? `${resize.count} elements resized (${resize.els[0]}, …)` : `${resize.el} resized ${resize.from} → ${resize.to}`);
       if (!facts.length) facts.push(`${pct}% of pixels changed with no computed-style differences (images, canvas or non-DOM content)`);
       what.push(`- \`${route}\` (${vps(changed)}) — ${facts.join('; ')}`);
     }
