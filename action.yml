@@ -1,0 +1,123 @@
+name: ui-diff
+description: Before/after screenshots and measured style changes for a pull request, posted to the PR.
+author: davidamunga
+branding:
+  icon: eye
+  color: purple
+
+# Runs the ui-diff skill's scripts with no agent: the routes come from `routes` or
+# .ui-diff.json, and the summary is generated from the measured changes.
+# The job must check out the PR head (fetch-depth: 0) and install the project's
+# dependencies first. See examples/workflows/ and the README's "Run in CI" section.
+# Needs `permissions: contents: write` (assets branch) and `pull-requests: write` (comment).
+
+inputs:
+  routes:
+    description: Comma-separated routes to capture, e.g. "/,/pricing". Added to the routes in .ui-diff.json. Required unless .ui-diff.json lists routes.
+    required: false
+    default: ""
+  dev-command:
+    description: Command that starts the app, with {port} for the port (PORT is set too). Default from .ui-diff.json, else detected from package.json.
+    required: false
+    default: ""
+  viewports:
+    description: e.g. "desktop:1440x900,mobile:iPhone 13" (the default).
+    required: false
+    default: ""
+  color-schemes:
+    description: e.g. "light,dark". Default light, or .ui-diff.json colorSchemes.
+    required: false
+    default: ""
+  mode:
+    description: "comment (default): add or update a PR comment. description: add or update a section of the PR description. prune: remove the PR's images from the assets branch (also what happens on any `closed` event)."
+    required: false
+    default: comment
+  working-directory:
+    description: Directory inside the checked-out repo to run from (if you checked out with `path:`).
+    required: false
+    default: "."
+  base:
+    description: Base ref to compare against. Default the PR's base commit.
+    required: false
+    default: ""
+  config:
+    description: Path to the config file. Default .ui-diff.json at the repo root, if present.
+    required: false
+    default: ""
+  summary:
+    description: Markdown file to use as the summary instead of the automatic one (e.g. written by an earlier step).
+    required: false
+    default: ""
+  assets-branch:
+    description: Branch that holds the screenshots.
+    required: false
+    default: ui-diff-assets
+  server-timeout:
+    description: Seconds to wait for each dev server to answer.
+    required: false
+    default: "180"
+  github-token:
+    description: Token for pushing the assets branch and posting. Needs contents and pull-requests write.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  skipped:
+    description: "\"true\" if the run was skipped (fork or Dependabot PR)."
+    value: ${{ steps.run.outputs.skipped }}
+  changed:
+    description: Screenshots with visual changes.
+    value: ${{ steps.run.outputs.changed }}
+  added:
+    description: Screenshots of pages that only exist on head.
+    value: ${{ steps.run.outputs.added }}
+  removed:
+    description: Screenshots of pages that only exist on base.
+    value: ${{ steps.run.outputs.removed }}
+  unchanged:
+    description: Screenshots with no visual change.
+    value: ${{ steps.run.outputs.unchanged }}
+  errors:
+    description: Screenshots that failed to capture.
+    value: ${{ steps.run.outputs.errors }}
+  comment-url:
+    description: URL of the comment or PR that was updated.
+    value: ${{ steps.run.outputs.comment-url }}
+  report-dir:
+    description: Local report directory (results.json, measured.md, images).
+    value: ${{ steps.run.outputs.report-dir }}
+
+runs:
+  using: composite
+  steps:
+    # Cache the toolchain (Playwright + Chromium), keyed on the script that installs it.
+    # Skipped for cleanup runs and fork PRs, which don't capture anything.
+    - id: key
+      if: inputs.mode != 'prune' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+      shell: bash
+      run: |
+        echo "hash=$(node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex").slice(0, 16))' "$GITHUB_ACTION_PATH/skills/ui-diff/scripts/setup.sh")" >> "$GITHUB_OUTPUT"
+    - if: steps.key.outputs.hash != ''
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/ui-diff
+          ~/.cache/ms-playwright
+          ~/Library/Caches/ms-playwright
+        key: ui-diff-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.hash }}
+    - id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        UI_DIFF_MODE: ${{ inputs.mode }}
+        UI_DIFF_ROUTES: ${{ inputs.routes }}
+        UI_DIFF_DEV: ${{ inputs.dev-command }}
+        UI_DIFF_VIEWPORTS: ${{ inputs.viewports }}
+        UI_DIFF_SCHEMES: ${{ inputs.color-schemes }}
+        UI_DIFF_BASE: ${{ inputs.base }}
+        UI_DIFF_CONFIG: ${{ inputs.config }}
+        UI_DIFF_SUMMARY: ${{ inputs.summary }}
+        UI_DIFF_BRANCH: ${{ inputs.assets-branch }}
+        UI_DIFF_SERVER_TIMEOUT: ${{ inputs.server-timeout }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: bash "$GITHUB_ACTION_PATH/action/ci.sh"

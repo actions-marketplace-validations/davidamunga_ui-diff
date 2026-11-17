@@ -3,8 +3,10 @@
 //
 // Usage:
 //   node comment.cjs --report .ui-diff/report [--base-url <prefix from publish.sh>] \
-//     [--summary summary.md] [--out comment.md] [--design <dir>]
+//     [--summary summary.md | --auto-summary] [--out comment.md] [--design <dir>]
 //
+// --auto-summary writes a short factual summary from the measured changes, for runs with
+// no agent to write summary.md (CI). It's labelled as automatic. --summary wins if both.
 // Omit --base-url to get relative image paths (for previewing, or manual upload mode).
 // Reads results.json (+ run.json for commits and coverage). The output is wrapped in
 // <!-- ui-diff:start/end --> markers so post.cjs can replace it on later runs.
@@ -34,9 +36,88 @@ const img = (rel, alt, width) => `<img src="${url(rel)}" alt="${alt}"${width ? `
 const label = (i) => [i.viewport, i.scheme && i.scheme !== 'light' ? i.scheme : null].filter(Boolean).join(' · ');
 const warn = (i) => (i.warnings || []).map((w) => `> ⚠️ ${w}`);
 
+// Facts only (measured values, statuses, warnings), grouped by route across viewports.
+function autoSummary() {
+  const MAX = 8;
+  const cap = (list) => (list.length > MAX ? [...list.slice(0, MAX), `- …and ${list.length - MAX} more`] : list);
+  const vps = (list) => [...new Set(list.map(label))].join(', ');
+  const routes = new Map();
+  for (const i of items) {
+    const k = i.route || i.name;
+    if (!routes.has(k)) routes.set(k, []);
+    routes.get(k).push(i);
+  }
+  const what = [];
+  // The same issue on several pages/viewports/elements (e.g. a shared header) is one line.
+  const look = new Map();
+  const flag = (issue, route, i, el) => {
+    if (!look.has(issue)) look.set(issue, { els: new Set(), routes: new Set(), items: [] });
+    const f = look.get(issue);
+    if (el) f.els.add(el);
+    f.routes.add(route);
+    f.items.push(i);
+  };
+  const few = (set, n) => [...set].slice(0, n).join(', ') + (set.size > n ? ', …' : '');
+  for (const [route, list] of routes) {
+    const of = (st) => list.filter((i) => i.status === st);
+    if (of('added').length) what.push(`- 🆕 \`${route}\` — new page (${vps(of('added'))})`);
+    if (of('removed').length) what.push(`- 🗑️ \`${route}\` — page removed (${vps(of('removed'))})`);
+    const changed = of('changed');
+    if (changed.length) {
+      const styles = new Map();
+      let copy = 0, added = 0, removed = 0, shift = 0, pct = 0;
+      for (const i of changed) {
+        pct = Math.max(pct, i.percent || 0);
+        const m = i.measured;
+        if (!m || !m.styles) continue;
+        for (const g of m.styles) styles.set(`${g.prop}|${g.from}|${g.to}`, g);
+        copy = Math.max(copy, m.copy.length);
+        added = Math.max(added, m.addedCount);
+        removed = Math.max(removed, m.removedCount);
+        if (m.moves.length) shift = Math.max(shift, Math.abs(m.moves[0].dy) || Math.abs(m.moves[0].dx));
+      }
+      const g = [...styles.values()];
+      const facts = g.slice(0, 3).map((x) => `\`${x.prop}\` ${x.from} → ${x.to}`);
+      if (g.length > 3) facts.push(`${g.length - 3} more style change${g.length > 4 ? 's' : ''}`);
+      if (copy) facts.push(`${copy} text change${copy > 1 ? 's' : ''}`);
+      if (added) facts.push(`${added} element${added > 1 ? 's' : ''} added`);
+      if (removed) facts.push(`${removed} element${removed > 1 ? 's' : ''} removed`);
+      if (shift) facts.push(`content shifted by up to ${shift}px`);
+      if (!facts.length) facts.push(`${pct}% of pixels changed with no computed-style differences (images, canvas or non-DOM content)`);
+      what.push(`- \`${route}\` (${vps(changed)}) — ${facts.join('; ')}`);
+    }
+    for (const i of list) {
+      const m = i.measured;
+      if (m && m.contrast) {
+        for (const c of m.contrast) flag(`contrast ${c.ratio}:1 (needs ${c.min}:1), ${c.fg} on ${c.bg}${c.was ? ` (was ${c.was}:1)` : ''}`, route, i, c.el);
+      } else if (m && i.status === 'added') {
+        // New pages only have pre-formatted lines: "⚠️ contrast R:1 (needs M:1): <el>, <fg> on <bg>"
+        for (const l of m.lines) {
+          const x = l.match(/^⚠️ (contrast \S+ \(needs \S+\)): (.*), (\S+(?: @ \d+%)? on \S+(?: @ \d+%)?)$/);
+          if (x) flag(`${x[1]}, ${x[3]}`, route, i, x[2]);
+          else flag(l.replace(/^⚠️ /, ''), route, i);
+        }
+      }
+      // A new page 404s on base (and a removed one on head); that's what new means, not an issue.
+      const expected = { added: 'base returned HTTP', removed: 'head returned HTTP' }[i.status];
+      for (const w of i.warnings || []) if (!(expected && w.startsWith(expected))) flag(w, route, i);
+      if (i.status === 'error') flag(`failed to capture: ${i.error}`, route, i);
+    }
+  }
+  const out = ['<sub>🤖 Automatic summary from measured changes; not written or reviewed by a person.</sub>', ''];
+  if (!what.length && !look.size) return [...out, 'No visual changes on the checked pages.'].join('\n');
+  if (what.length) out.push('**What changed**', ...cap(what), '');
+  if (look.size) {
+    const lines = [...look].map(([issue, f]) => `- ⚠️ ${issue}${f.els.size ? `: ${few(f.els, 3)}` : ''} — ${few(new Set([...f.routes].map((r) => `\`${r}\``)), 4)} (${vps(f.items)})`);
+    out.push('**Worth a look**', ...cap(lines));
+  }
+  return out.join('\n');
+}
+
 const out = ['<!-- ui-diff:start -->', '## 🎨 UI diff', ''];
 
 if (a.summary && fs.existsSync(a.summary)) out.push(fs.readFileSync(a.summary, 'utf8').trim(), '');
+else if (a['auto-summary']) out.push(autoSummary(), '');
 
 const stats = summary ? [
   summary.changed && `**${summary.changed} changed**`,
