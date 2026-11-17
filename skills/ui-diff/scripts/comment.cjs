@@ -134,7 +134,7 @@ if (designs.length) stats.push(`${designs.length} compared with the design`);
 out.push(`<sub>${stats.join(' · ')}</sub>`);
 if (run) {
   const head = `\`${run.head.sha.slice(0, 7)}\`${run.head.dirty ? ' + uncommitted changes' : ''}`;
-  out.push(`<sub>Checked ${run.routes.map((r) => `\`${r}\``).join(', ')} at ${run.viewports.join(', ')}${run.schemes.length > 1 ? ` (${run.schemes.join(', ')})` : ''} — \`${run.base.sha.slice(0, 7)}\` → ${head}. Pages not listed were not checked.</sub>`);
+  out.push(`<sub>Checked ${run.storybook ? 'stories ' : ''}${run.routes.map((r) => `\`${r}\``).join(', ')} at ${run.viewports.join(', ')}${run.schemes.length > 1 ? ` (${run.schemes.join(', ')})` : ''} — \`${run.base.sha.slice(0, 7)}\` → ${head}. ${run.storybook ? 'Stories' : 'Pages'} not listed were not checked.</sub>`);
 }
 out.push('');
 

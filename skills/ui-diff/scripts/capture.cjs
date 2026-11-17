@@ -172,6 +172,13 @@ function devOverlayError() {
   return !!(wp && wp.style.display !== 'none');
 }
 
+// Storybook's error screen (story threw, or no such story): its message, else null.
+function storybookError() {
+  if (!document.body.classList.contains('sb-show-errordisplay')) return null;
+  const el = document.querySelector('#error-message') || document.querySelector('.sb-errordisplay');
+  return ((el && el.innerText) || 'unknown error').trim().split('\n')[0].slice(0, 200);
+}
+
 async function main() {
   const a = args();
   if (!a.url || !a.out) {
@@ -208,7 +215,7 @@ async function main() {
         page.on('pageerror', (e) => pageErrors.push(String(e.message || e).split('\n')[0]));
         const url = new URL(route.path, a.url).toString();
         const file = `${route.name}__${vpName}${schemes.length > 1 ? `__${scheme}` : ''}.png`;
-        const entry = { route: route.path, name: route.name, viewport: vpName, scheme, file, url };
+        const entry = { route: route.label || route.path, name: route.name, viewport: vpName, scheme, file, url };
         const figma = figmaFor(route, vpName, Object.keys(viewports)[0]);
         if (figma) entry.figma = figma;
         try {
@@ -220,6 +227,8 @@ async function main() {
           await page.evaluate(() => document.fonts && document.fonts.ready);
           await page.waitForTimeout(settleMs);
           if (await page.evaluate(devOverlayError)) entry.devOverlayError = true;
+          const sbError = await page.evaluate(storybookError);
+          if (sbError) pageErrors.push(`Storybook couldn't render the story: ${sbError}`);
           await page.addStyleTag({ content: extraCSS });
           await page.screenshot({
             path: path.join(a.out, file),

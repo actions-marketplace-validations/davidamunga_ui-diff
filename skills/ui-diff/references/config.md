@@ -44,6 +44,7 @@ Saves what you'd otherwise rediscover every run. Everything is optional.
 | `colorSchemes` | `["light"]` by default. Add `"dark"` if the app supports it. |
 | `storageState` | Playwright auth state for pages behind login (see below). |
 | `post` | Default destination: `"comment"`, `"description"` or `"manual"`. |
+| `storybook` | `true` to always diff Storybook stories instead of pages (see `route-mapping.md`), or an object with any of: `dir` (package holding `.storybook/`, e.g. `"packages/ui"`), `command` (with `{port}`; default: the `storybook` script, else `storybook dev -p {port} --ci`), `stories` (ids always captured, `*` allowed), `viewports` (default 1024×768 + iPhone 13; top-level `viewports` are for pages), `max` (cap on picked stories, default 40). `mask`, `hide`, `css` and `colorSchemes` apply to stories too. |
 
 ## Pages behind login
 
