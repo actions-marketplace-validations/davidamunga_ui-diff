@@ -5,7 +5,7 @@ license: MIT (see LICENSE.txt)
 compatibility: Needs bash, git and Node.js 18+; the GitHub CLI (gh, logged in) to post to PRs; python3 for plain-HTML sites. The first run downloads Playwright + Chromium (~150 MB) into ~/.cache/ui-diff. macOS or Linux.
 metadata:
   author: davidamunga
-  version: "0.2.1"
+  version: "0.3.0"
 ---
 
 # UI diff
