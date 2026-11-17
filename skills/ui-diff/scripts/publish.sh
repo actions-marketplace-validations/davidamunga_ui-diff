@@ -16,6 +16,8 @@
 # Works in a throwaway clone; the user's checkout is never touched. prune.sh removes a
 # PR's images once it's closed.
 set -euo pipefail
+# stdout carries only the URL prefix (callers capture it); everything else goes to stderr.
+exec 3>&1 1>&2
 
 REPORT="$(cd "$1" && pwd)"
 PR="$2"
@@ -42,7 +44,9 @@ fi
 # comments/edits don't show broken images.
 rm -rf "$DEST"
 mkdir -p "$DEST"
-(cd "$REPORT" && find . -name '*.png' -print0 | xargs -0 -I{} rsync -R {} "$TMP/$DEST/")
+(cd "$REPORT" && find . -name '*.png' | while read -r f; do
+  mkdir -p "$TMP/$DEST/$(dirname "$f")" && cp "$f" "$TMP/$DEST/$f"
+done)
 
 assets_push "ui-diff assets (latest: PR #$PR @ $SHA)"
-echo "https://github.com/$REPO/blob/$BRANCH/$DEST"
+echo "https://github.com/$REPO/blob/$BRANCH/$DEST" >&3

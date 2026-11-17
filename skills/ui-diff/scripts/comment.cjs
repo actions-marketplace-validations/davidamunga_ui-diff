@@ -31,6 +31,10 @@ const designs = fs.existsSync(designDir)
       .filter((d) => d.kind === 'ui-diff/design-compare')
   : [];
 const run = fs.existsSync(path.join(a.report, 'run.json')) ? read('run.json') : null;
+if (a['base-url'] && !/^https?:\/\/\S+$/.test(a['base-url'])) {
+  console.error(`--base-url doesn't look like a URL prefix: ${JSON.stringify(a['base-url'].slice(0, 200))}`);
+  process.exit(1);
+}
 const url = (rel) => (a['base-url'] ? `${a['base-url']}/${rel}?raw=true` : rel);
 const img = (rel, alt, width) => `<img src="${url(rel)}" alt="${alt}"${width ? ` width="${width}"` : ''}>`;
 const label = (i) => [i.viewport, i.scheme && i.scheme !== 'light' ? i.scheme : null].filter(Boolean).join(' · ');
