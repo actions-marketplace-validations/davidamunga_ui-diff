@@ -7,14 +7,20 @@ set -euo pipefail
 TOOLS_DIR="${UI_DIFF_HOME:-${XDG_CACHE_HOME:-$HOME/.cache}/ui-diff}"
 mkdir -p "$TOOLS_DIR"
 
-if [ ! -f "$TOOLS_DIR/node_modules/.ui-diff-ok" ]; then
+# The marker records which package set is installed, so adding a package here
+# reinstalls for people who already have an older set.
+PKGS="playwright@^1 pixelmatch@5.3.0 pngjs@7 axe-core@4.10.3"
+MARK="$TOOLS_DIR/node_modules/.ui-diff-ok"
+
+if [ "$(cat "$MARK" 2>/dev/null)" != "$PKGS" ]; then
   echo "Installing ui-diff tools into $TOOLS_DIR ..." >&2
   cd "$TOOLS_DIR"
   [ -f package.json ] || echo '{"name":"ui-diff-tools","private":true}' > package.json
-  npm install --silent --no-audit --no-fund playwright@^1 pixelmatch@5.3.0 pngjs@7 >&2
+  # shellcheck disable=SC2086
+  npm install --silent --no-audit --no-fund $PKGS >&2
   # UI_DIFF_WITH_DEPS=1 also installs the system libraries Chromium needs (CI, fresh Linux; uses sudo).
   npx --yes playwright install ${UI_DIFF_WITH_DEPS:+--with-deps} chromium >&2
-  touch node_modules/.ui-diff-ok
+  echo "$PKGS" > "$MARK"
 fi
 
 echo "$TOOLS_DIR"
