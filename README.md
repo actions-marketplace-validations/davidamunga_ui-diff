@@ -36,13 +36,15 @@ for CI.
 
 ## What it does
 
-- **Finds the affected pages** from the changed files: routes, layouts, shared components, CSS and design tokens.
+- **Finds the affected pages** from the changed files: it reads your framework's routes (Next.js, SvelteKit, Nuxt, Astro, Remix/React Router, plain HTML) and follows imports from changed components, through aliases and workspace packages, to the pages that use them.
 - **Renders base and head side by side** in git worktrees on free ports. Your checkout and your other running servers are left alone.
 - **Screenshots** each page on desktop and an emulated iPhone (dark mode optional), with animations frozen so the shots are reproducible.
-- **Pixel-diffs** them and crops zoomed before/after images of each changed area.
+- **Shows each change as an animation** that flips between before and after, inline in the PR comment, with the still pair one click away.
 - **Measures** every element's computed styles: `padding 8px 14px → 12px 20px`, `#2563eb → #7c3aed`, layout shifts, copy changes and new WCAG contrast failures.
+- **Flags likely bugs the PR introduces:** clipped text, sideways scrolling on mobile, overlapping elements, controls pushed off-screen, tap targets that are too small, and accessibility violations (axe-core). Problems that already existed on base aren't reported.
 - **Writes a design summary** from those measurements, leading with what looks unintended.
 - **Posts it to the PR** as a comment or a section of the description. Re-runs update it instead of adding new ones.
+- **Can gate the merge on a design sign-off:** a `ui-diff/design-review` check stays pending until someone with write access ticks "Design approved" in the comment.
 
 It also works on **Storybook** stories, compares the result against a **Figma** frame you
 link, and writes a local review page with a before/after slider.
