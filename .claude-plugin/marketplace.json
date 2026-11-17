@@ -1,0 +1,11 @@
+{
+  "name": "ui-diff",
+  "owner": { "name": "David Amunga", "email": "david@davidamunga.com" },
+  "plugins": [
+    {
+      "name": "ui-diff",
+      "source": "./",
+      "description": "Before/after screenshots, pixel diffs and a written UX summary of a pull request's UI changes, posted to the PR."
+    }
+  ]
+}

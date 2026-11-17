@@ -1,0 +1,7 @@
+{
+  "name": "ui-diff",
+  "version": "0.1.0",
+  "description": "Before/after screenshots, pixel diffs and a written UX summary of a pull request's UI changes, posted to the PR.",
+  "author": { "name": "David Amunga", "email": "david@davidamunga.com" },
+  "keywords": ["design", "ui", "visual-diff", "pull-request", "screenshots", "playwright"]
+}
