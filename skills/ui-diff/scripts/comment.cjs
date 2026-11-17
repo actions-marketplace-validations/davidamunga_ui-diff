@@ -3,9 +3,11 @@
 //
 // Usage:
 //   node comment.cjs --report .ui-diff/report [--base-url <prefix from publish.sh>] \
-//     [--summary summary.md | --auto-summary] [--out comment.md] [--design <dir>]
+//     [--summary summary.md | --auto-summary] [--out comment.md] [--design <dir>] [--no-animate]
 //     [--approval [<head sha>] [--no-checkbox --label <name>]]
 //
+// Changed areas lead with the animated before ⇄ after (diff.cjs's zoom flip APNGs), with
+// the still pairs collapsed; --no-animate shows only the stills.
 // --auto-summary writes a short factual summary from the measured changes, for runs with
 // no agent to write summary.md (CI). It's labelled as automatic. --summary wins if both.
 // Omit --base-url to get relative image paths (for previewing, or manual upload mode).
@@ -42,6 +44,7 @@ const url = (rel) => (a['base-url'] ? `${a['base-url']}/${rel}?raw=true` : rel);
 const img = (rel, alt, width) => `<img src="${url(rel)}" alt="${alt}"${width ? ` width="${width}"` : ''}>`;
 const label = (i) => [i.viewport, i.scheme && i.scheme !== 'light' ? i.scheme : null].filter(Boolean).join(' · ');
 const warn = (i) => (i.warnings || []).map((w) => `> ⚠️ ${w}`);
+const STATIC = '<details><summary>Before | After (still)</summary>\n';
 
 // Facts only (measured values, statuses, warnings), grouped by route across viewports.
 function autoSummary() {
@@ -154,11 +157,15 @@ for (const i of items.filter((x) => x.status === 'changed')) {
   const size = i.sizeChanged ? ` · height ${i.before.height}→${i.after.height}px` : '';
   out.push(`### \`${i.route || i.name}\` — ${label(i)}`, `<sub>${i.percent}% of pixels changed${size}</sub>`, '', ...warn(i));
   const zoomed = (i.regions || []).filter((r) => r.zoom);
+  // Animated before ⇄ after first; the static pairs move into a collapsed block.
+  const flips = a['no-animate'] ? [] : zoomed.filter((r) => r.zoom.flip);
+  if (flips.length) out.push(flips.map((r, n) => img(r.zoom.flip, `area ${n + 1}: before, then after (animated)`)).join(' '), '', STATIC);
   if (zoomed.length) {
     out.push('| Before | After |', '|---|---|');
     for (const r of zoomed) out.push(`| ${img(r.zoom.before, 'before')} | ${img(r.zoom.after, 'after')} |`);
     out.push('');
   }
+  if (flips.length) out.push('</details>', '');
   if (i.regionsOmitted) out.push(`<sub>+${i.regionsOmitted} more changed area${i.regionsOmitted > 1 ? 's' : ''} — see the full page below.</sub>`, '');
   if (i.measured && i.measured.lines.length) {
     out.push('<details><summary>Measured changes</summary>', '', ...i.measured.lines.map((l) => `- ${l}`), '', '</details>', '');
@@ -208,7 +215,9 @@ if (same.length) {
 }
 
 out.push('<sub>Generated with the ui-diff skill</sub>', '<!-- ui-diff:end -->');
-const md = out.join('\n').replace(/\n{3,}/g, '\n\n');
+let md = out.join('\n').replace(/\n{3,}/g, '\n\n');
+// Too long: the animations already show each change, so drop their still copies first.
+if (md.length > 60000) md = md.split(STATIC).map((s, n) => (n ? s.slice(s.indexOf('</details>') + 10) : s)).join('').replace(/\n{3,}/g, '\n\n');
 // GitHub rejects comment/PR bodies over 65,536 chars.
 if (md.length > 60000) {
   console.error(`warning: report is ${md.length} chars (GitHub limit 65536) — capture fewer routes/viewports or split the comment.`);

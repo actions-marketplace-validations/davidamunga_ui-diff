@@ -277,7 +277,9 @@ C2=$!
 wait "$C1" || { cat "$WORK/capture-base.log" >&2; die "base capture failed"; }
 wait "$C2" || { cat "$WORK/capture-head.log" >&2; die "head capture failed"; }
 
-SUMMARY="$(node "$S/diff.cjs" --before "$WORK/shots/before" --after "$WORK/shots/after" --out "$WORK/report")"
+DIFF=()
+[ "$(cfg animate)" = false ] && DIFF+=(--no-animate)
+SUMMARY="$(node "$S/diff.cjs" --before "$WORK/shots/before" --after "$WORK/shots/after" --out "$WORK/report" ${DIFF[@]+"${DIFF[@]}"})"
 node "$S/stylediff.cjs" --before "$WORK/shots/before" --after "$WORK/shots/after" --report "$WORK/report" > /dev/null
 
 node -e '

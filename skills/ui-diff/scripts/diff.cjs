@@ -3,15 +3,16 @@
 //
 // Usage:
 //   node diff.cjs --before shots/before --after shots/after --out shots/report \
-//     [--threshold 0.1] [--min-pixels 20]
+//     [--threshold 0.1] [--min-pixels 20] [--no-animate]
 //
 // For every screenshot that changed (or was added/removed) the bundle gets:
 //   before/<file>, after/<file>, diff/<file>            full-page images
 //   zoom/<name>__r<i>__{before,after,diff}.png           crops of each changed region
+//   zoom/<name>__r<i>__flip.png                          animated before ⇄ after (APNG; not with --no-animate)
 // plus results.json describing everything (consumed by comment.cjs).
 const fs = require('fs');
 const path = require('path');
-const { need, args, readPng, writePng, padTo, crop, findRegions } = require('./lib.cjs');
+const { need, args, readPng, writePng, padTo, crop, findRegions, flipApng } = require('./lib.cjs');
 const { PNG } = need('pngjs');
 const pixelmatch = need('pixelmatch');
 
@@ -42,6 +43,7 @@ function main() {
   }
   const threshold = Number(a.threshold ?? 0.1);
   const minPixels = Number(a['min-pixels'] ?? 20);
+  const animate = !a['no-animate'];
   const before = new Map(loadManifest(a.before).map((m) => [m.file, m]));
   const after = new Map(loadManifest(a.after).map((m) => [m.file, m]));
   const files = [...new Set([...before.keys(), ...after.keys()])].sort();
@@ -109,6 +111,10 @@ function main() {
               const rel = `zoom/${base}__${side}.png`;
               writePng(path.join(a.out, rel), crop(img, r));
               region.zoom[side] = rel;
+            }
+            if (animate) {
+              region.zoom.flip = `zoom/${base}__flip.png`;
+              fs.writeFileSync(path.join(a.out, region.zoom.flip), flipApng(crop(b, r), crop(af, r)));
             }
           }
           return region;

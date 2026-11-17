@@ -195,6 +195,12 @@ expect "$R/results.json" 'd.summary.changed === 4 && d.summary.added === 2 && d.
 expect "$R/results.json" 'item(d, "new-html__desktop.png").status === "added"' "page missing on base (404) is reported as new"
 expect "$R/results.json" 'item(d, "about-html__desktop.png").status === "unchanged"' "page that doesn't use the changed CSS is unchanged"
 expect "$R/results.json" 'item(d, "pricing-html__desktop.png").regions.some((r) => r.zoom)' "changed page has zoomed regions"
+expect "$R/results.json" 'd.items.flatMap((i) => i.regions || []).filter((r) => r.zoom).every((r) => /__flip\.png$/.test(r.zoom.flip))' "every zoomed region has an animated flip"
+FLIP="$(node -e 'const r=require(process.argv[1]);console.log(r.items.find((i)=>i.file==="pricing-html__desktop.png").regions[0].zoom.flip)' "$R/results.json")"
+node "$HERE/apng.cjs" "$R/$FLIP" > "$TMP/flip.json"
+expect "$TMP/flip.json" 'd.frames === 2 && d.plays === 0 && d.chunks.join() === "IHDR,acTL,fcTL,IDAT,fcTL,fdAT,IEND"' "flip is an APNG: 2 frames, loops forever"
+expect "$TMP/flip.json" 'd.seqOk && d.crcOk && d.framesOk && d.delays.join() === "1200,1200"' "flip: sequence numbers, CRCs, frame bounds, 1.2s holds"
+expect "$TMP/flip.json" 'd.size < 300000' "flip is small"
 expect "$R/measured.md" 'has(d, "`padding`: 8px 14px → 12px 20px")' "measures padding change (as shorthand)"
 expect "$R/measured.md" 'has(d, "`border-radius`: 4px → 12px")' "measures radius change"
 expect "$R/measured.md" 'has(d, "`color`: #2563eb → #9ca3af")' "measures color change in hex"
@@ -240,6 +246,10 @@ expect "$TMP/comment.md" 'has(d, "Pages not listed were not checked")' "states c
 expect "$TMP/comment.md" 'has(d, "pr-1/abc1234/zoom/") && has(d, "?raw=true")' "image URLs use the published prefix"
 expect "$TMP/comment.md" 'has(d, "🆕 `/new.html`")' "new page section"
 expect "$TMP/comment.md" 'has(d, "<summary>Measured changes</summary>")' "measured changes section"
+expect "$TMP/comment.md" 'has(d, "pr-1/abc1234/'"$FLIP"'?raw=true") && d.indexOf("__flip.png") < d.indexOf("<summary>Before | After (still)</summary>")' "animated flips lead, still pairs collapsed after"
+node "$S/comment.cjs" --report "$R" --no-animate --out "$TMP/comment-still.md"
+expect "$TMP/comment-still.md" '!has(d, "__flip.png") && !has(d, "(still)") && has(d, "| Before | After |")' "--no-animate: still pairs only"
+expect "$R/index.html" 'has(d, "'"$FLIP"'") && has(d, "trio four")' "review page shows the animation too"
 
 section "e2e: vs design section (base screenshot standing in for the Figma frame)"
 node "$S/compare.cjs" --design "$REPO/.ui-diff/shots/before/pricing-html__desktop.png" --actual "$REPO/.ui-diff/shots/after/pricing-html__desktop.png" \
@@ -333,6 +343,7 @@ check "unshallowed the checkout to find the merge-base" test "$(git -C "$TMP/ci"
 expect "$TMP/gh-output" 'has(d, "skipped=false") && has(d, "changed=2") && has(d, "errors=0")' "sets counts as outputs"
 expect "$TMP/gh-output" 'has(d, "comment-url=https://github.com/acme/demo/pull/7#issuecomment-1")' "sets the comment URL output"
 check "published PR #7's images at the head sha" git --git-dir="$TMP/remote.git" cat-file -e "ui-diff-assets:pr-7/${HEAD_SHA:0:7}/diff/pricing-html__desktop.png"
+check "published the animated flips" test -n "$(git --git-dir="$TMP/remote.git" ls-tree -r --name-only ui-diff-assets "pr-7/${HEAD_SHA:0:7}/zoom/" | grep '__flip\.png$')"
 expect "$GH_LOG" 'has(d, "pr comment 7 --body-file")' "posts the comment"
 expect "$TMP/ci/.ui-diff/comment.md" 'has(d, "Automatic summary") && has(d, "acme/demo/blob/ui-diff-assets/pr-7/")' "comment has the automatic summary and published images"
 expect "$TMP/ci.err.out" 'has(d, "::add-mask::")' "masks the git auth header"
@@ -484,10 +495,13 @@ expect "$REPO/.ui-diff/report/results.json" 'd.summary.changed === 0 && d.summar
 
 section "e2e: uncommitted changes are labelled"
 echo '.card h3 { letter-spacing: 0.05em; }' >> style.css
-bash "$S/run.sh" --base HEAD --routes "/pricing.html" > /dev/null 2> "$TMP/dirty.err"
+echo '{ "animate": false }' > "$TMP/noanim.json"
+bash "$S/run.sh" --base HEAD --routes "/pricing.html" --config "$TMP/noanim.json" > /dev/null 2> "$TMP/dirty.err"
 check "run.sh exits 0" test $? = 0
 expect "$REPO/.ui-diff/report/run.json" 'd.head.dirty === true' "run.json marks head as dirty"
 expect "$REPO/.ui-diff/report/measured.md" 'has(d, "`letter-spacing`")' "uncommitted CSS change is measured"
+expect "$REPO/.ui-diff/report/results.json" 'd.items.some((i) => (i.regions || []).some((r) => r.zoom)) && !JSON.stringify(d).includes("flip")' 'config "animate": false → zoom crops but no flips'
+check "no flip files written" test -z "$(find "$REPO/.ui-diff/report" -name '*__flip.png')"
 git checkout -q -- style.css
 
 section "e2e: failures are reported and cleaned up"

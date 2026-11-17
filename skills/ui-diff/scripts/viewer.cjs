@@ -82,7 +82,7 @@ function changed(i) {
   const zooms = zoomed.length
     ? `<h3>Changed areas</h3><div class="zooms">${zoomed.map((r, n) => `
       <figure class="zoom"><figcaption>Area ${n + 1} <span>${r.width}×${r.height} at ${r.x},${r.y}</span></figcaption>
-        <div class="trio">${['before', 'after', 'diff'].map((s) => `<div><span class="cap">${s}</span>${img(r.zoom[s], `${s}, area ${n + 1}`)}</div>`).join('')}</div>
+        <div class="trio${r.zoom.flip ? ' four' : ''}">${['before', 'after', 'diff', 'flip'].filter((s) => r.zoom[s]).map((s) => `<div><span class="cap">${s === 'flip' ? 'animated' : s}</span>${img(r.zoom[s], `${s === 'flip' ? 'before, then after (animated)' : s}, area ${n + 1}`)}</div>`).join('')}</div>
       </figure>`).join('')}</div>`
     : '';
   const more = i.regionsOmitted ? `<p class="muted">+${i.regionsOmitted} more changed area${i.regionsOmitted > 1 ? 's' : ''}; see the full page.</p>` : '';
@@ -183,6 +183,7 @@ figure { margin: 0; } figure img { border: 1px solid var(--line); border-radius:
 figcaption { font-size: 13px; color: var(--muted); margin-bottom: 4px; } figcaption span { margin-left: 6px; }
 .zooms { display: grid; gap: 16px; }
 .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: start; }
+.trio.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .trio .cap { display: block; font-size: 12px; color: var(--muted); text-transform: capitalize; }
 .trio img { width: 100%; border: 1px solid var(--line); border-radius: 4px; background: var(--card); }
 .measured { padding-left: 20px; margin: 0; } .measured li { margin: 2px 0; word-break: break-word; }
@@ -190,7 +191,7 @@ section.rest { border-top: 1px solid var(--line); margin-top: 32px; } section.re
 .empty { color: var(--muted); padding: 24px 0; }
 @media (max-width: 640px) {
   .side, .diff-on .side { grid-template-columns: minmax(0, 1fr); }
-  .trio { grid-template-columns: minmax(0, 1fr); }
+  .trio, .trio.four { grid-template-columns: minmax(0, 1fr); }
 }`;
 
 // Item switching (buttons, select, ←/→, #hash), slider drag, mode + diff toggles.
