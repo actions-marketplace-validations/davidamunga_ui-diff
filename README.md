@@ -194,6 +194,48 @@ To remove a PR's images when it closes, add
 [`examples/workflows/ui-diff-cleanup.yml`](examples/workflows/ui-diff-cleanup.yml) (it runs
 the action with `mode: prune`).
 
+### Design review gate
+
+Opt in with `require-approval: true` to make UI changes need a sign-off before merge. The
+action then sets a `ui-diff/design-review` commit status on the PR head:
+
+- **Visual changes** (changed, new or removed pages, or pages that failed to capture) →
+  `pending` ("2 pages changed — needs design review"), linking to the comment, which gets a
+  `- [ ] **Design approved**` box.
+- **No visual changes** → `success`.
+- **The run fails** → no status is set. If the check is required, the PR stays blocked
+  ("Expected — waiting for status") until a run succeeds: it fails closed.
+
+Someone with write, maintain or admin access approves by **ticking the box** (or adding the
+`design-approved` label, set with `approval-label`). That needs a second workflow,
+[`examples/workflows/ui-diff-approve.yml`](examples/workflows/ui-diff-approve.yml), which
+runs the action with `mode: approve`. It sets the status to `success` ("Approved by @them")
+and adds "✅ Approved by @them for `abc1234`" under the box. Unticking or removing the label
+puts it back to `pending`. Ticks from users without write access, and edits by the bot itself,
+are ignored.
+
+Approval belongs to one commit. The comment records the sha it was rendered for, and a
+tick only counts while that sha is still the PR head. A new push with visual changes sets
+the new commit to `pending`, renders an unticked box and removes the label. A re-run on an
+already-approved commit keeps the approval.
+
+To block merging until then, add `ui-diff/design-review` as a required status check in the
+branch protection rule (or ruleset) for your default branch. It shows up in the list once
+it's been reported on a PR. Add `statuses: write` to `ui-diff.yml`'s permissions; the
+approve workflow needs `statuses: write`, `pull-requests: write` and `issues: write`.
+
+- **Security:** `issue_comment` workflows always run the default branch's workflow file
+  with a write token. `mode: approve` never checks out or runs PR code. It reads the event
+  payload and calls the GitHub API, so keep the approve workflow free of checkout and build
+  steps.
+- **Forks:** the main run skips fork PRs (read-only token), so they get no comment and no
+  status, and a required check blocks them. Ticking a box works on fork PRs, because
+  `issue_comment` runs with the base repo's token. The box only exists if the comment was
+  posted some other way, e.g. by an agent with `requireApproval`. Label approval on fork
+  PRs fails: the `pull_request` event gives them a read-only token too.
+- **Description mode** has no box; approve with the label.
+- **Self-approval** is allowed: a PR author with write access can tick their own box.
+
 <details>
 <summary>All inputs and outputs</summary>
 
@@ -203,13 +245,15 @@ the action with `mode: prune`).
 | `dev-command` | detected | Starts the app; `{port}` is replaced with the port. |
 | `viewports` | `desktop:1440x900,mobile:iPhone 13` | |
 | `color-schemes` | `light` | e.g. `light,dark` |
-| `mode` | `comment` | `comment`, `description` (a section of the PR description), or `prune` |
+| `mode` | `comment` | `comment`, `description` (a section of the PR description), `prune`, or `approve` (the approve workflow) |
 | `working-directory` | `.` | Where the repo is checked out, if you used `path:` with checkout. |
 | `base` | the PR's base commit | |
 | `config` | `.ui-diff.json` | |
 | `summary` | automatic | Markdown file to use as the summary. |
 | `assets-branch` | `ui-diff-assets` | |
 | `server-timeout` | `180` | Seconds to wait for each dev server. |
+| `require-approval` | `false` | `true`: set the `ui-diff/design-review` status and add an approval box (see [Design review gate](#design-review-gate)). |
+| `approval-label` | `design-approved` | Label that also approves. Use the same value in the approve workflow. |
 | `github-token` | `github.token` | |
 
 Outputs: `changed`, `added`, `removed`, `unchanged`, `errors`, `comment-url`, `report-dir`,
@@ -275,7 +319,7 @@ Nothing touches GitHub. CI runs the full tier on Ubuntu and macOS for every push
 install.sh                      install for every detected agent
 action.yml                      GitHub Action (runs action/ci.sh)
 action/ci.sh                    the pipeline with no agent: run → publish → comment → post, or prune
-examples/workflows/             workflows to copy: ui-diff.yml, ui-diff-cleanup.yml
+examples/workflows/             workflows to copy: ui-diff.yml, ui-diff-cleanup.yml, ui-diff-approve.yml
 skills/ui-diff/
 ├── SKILL.md                    the workflow the agent follows
 ├── LICENSE.txt                 MIT (a copy that travels with the skill folder)
@@ -295,7 +339,8 @@ skills/ui-diff/
 │   ├── prune.sh                remove a closed PR's images from it
 │   ├── assets.sh               shared by both: throwaway clone, single-commit push
 │   ├── comment.cjs             render the PR markdown
-│   └── post.cjs                create or update the PR comment / description section
+│   ├── post.cjs                create or update the PR comment / description section
+│   └── review.cjs              design review gate: commit status, approve by box or label
 └── references/
     ├── route-mapping.md        changed files → routes (and stories), per framework
     ├── config.md               .ui-diff.json options, auth, noise control

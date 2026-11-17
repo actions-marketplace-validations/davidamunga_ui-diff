@@ -1,0 +1,34 @@
+# Copy to .github/workflows/ui-diff-approve.yml, alongside ui-diff.yml with
+# `require-approval: true`. Ticking "Design approved" in the ui-diff comment (or adding the
+# design-approved label) by someone with write access sets the ui-diff/design-review status
+# to success for the PR's current head commit; unticking (or removing the label) sets it back
+# to pending. Make the check required in branch protection to block merging until then.
+#
+# issue_comment runs this file from the default branch with a write token, even for fork
+# PRs. That's safe here: there's no checkout and no PR code runs; the action only reads the
+# event payload and calls the GitHub API.
+name: UI diff approval
+
+on:
+  issue_comment:
+    types: [edited]
+  pull_request:
+    types: [labeled, unlabeled]
+
+permissions:
+  statuses: write        # set ui-diff/design-review
+  pull-requests: write   # edit the ui-diff comment, read the PR
+  issues: write          # comment edits go through the issues API
+
+jobs:
+  approve:
+    # Only PR comments carrying the ui-diff report, or the approval label.
+    if: >-
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '<!-- ui-diff:start -->')) ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'design-approved')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: davidamunga/ui-diff@v0
+        with:
+          mode: approve
+          # approval-label: design-approved   # match ui-diff.yml (and the `if:` above)

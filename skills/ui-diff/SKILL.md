@@ -147,6 +147,8 @@ node $SKILL/scripts/post.cjs --pr <pr> --body .ui-diff/comment.md --mode comment
     matters most when `storageState` logged in as a real account. Get a yes before posting.
 - `post.cjs` replaces the previous ui-diff comment or description section instead of
   stacking new ones. Everything else in the description is left as it was.
+- Add `--approval` to `comment.cjs` only if `.ui-diff.json` has `"requireApproval": true`
+  (the repo runs the design-review workflow): it adds a "Design approved" box.
 - **Manual mode** (no assets branch, or no push access): run `comment.cjs` without
   `--base-url`, then `open .ui-diff/report`. The user drags the images into the PR
   comment box (GitHub has no API for that upload). Tell them which image goes where.

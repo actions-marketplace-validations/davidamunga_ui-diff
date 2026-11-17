@@ -4,6 +4,7 @@
 // Usage:
 //   node comment.cjs --report .ui-diff/report [--base-url <prefix from publish.sh>] \
 //     [--summary summary.md | --auto-summary] [--out comment.md] [--design <dir>]
+//     [--approval [<head sha>] [--no-checkbox --label <name>]]
 //
 // --auto-summary writes a short factual summary from the measured changes, for runs with
 // no agent to write summary.md (CI). It's labelled as automatic. --summary wins if both.
@@ -12,6 +13,8 @@
 // <!-- ui-diff:start/end --> markers so post.cjs can replace it on later runs.
 // Design comparisons from compare.cjs (<report>/design/*.json, or --design <dir> inside the
 // report) get a "vs design" section; results.json may be absent when that's all there is.
+// --approval (design review gate, see review.cjs) adds a "Design approved" box tied to the
+// head commit when anything changed; --no-checkbox says to use the label instead.
 const fs = require('fs');
 const path = require('path');
 const { args } = require('./lib.cjs');
@@ -140,6 +143,12 @@ if (run) {
   out.push(`<sub>Checked ${run.storybook ? 'stories ' : ''}${run.routes.map((r) => `\`${r}\``).join(', ')} at ${run.viewports.join(', ')}${run.schemes.length > 1 ? ` (${run.schemes.join(', ')})` : ''} — \`${run.base.sha.slice(0, 7)}\` → ${head}. ${run.storybook ? 'Stories' : 'Pages'} not listed were not checked.</sub>`);
 }
 out.push('');
+if (a.approval) {
+  const review = require('./review.cjs');
+  const c = review.counts(items);
+  const sha = a.approval === true ? run && run.head.sha : a.approval;
+  if (c.pages + c.failed && sha) out.push(review.block({ sha, ...c, checkbox: !a['no-checkbox'], label: a.label }), '');
+}
 
 for (const i of items.filter((x) => x.status === 'changed')) {
   const size = i.sizeChanged ? ` · height ${i.before.height}→${i.after.height}px` : '';

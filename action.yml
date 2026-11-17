@@ -9,7 +9,8 @@ branding:
 # .ui-diff.json, and the summary is generated from the measured changes.
 # The job must check out the PR head (fetch-depth: 0) and install the project's
 # dependencies first. See examples/workflows/ and the README's "Run in CI" section.
-# Needs `permissions: contents: write` (assets branch) and `pull-requests: write` (comment).
+# Needs `permissions: contents: write` (assets branch) and `pull-requests: write` (comment),
+# plus `statuses: write` with require-approval. mode: approve needs no checkout.
 
 inputs:
   routes:
@@ -29,7 +30,7 @@ inputs:
     required: false
     default: ""
   mode:
-    description: "comment (default): add or update a PR comment. description: add or update a section of the PR description. prune: remove the PR's images from the assets branch (also what happens on any `closed` event)."
+    description: "comment (default): add or update a PR comment. description: add or update a section of the PR description. prune: remove the PR's images from the assets branch (also what happens on any `closed` event). approve: handle a design approval (ticked box or label); see examples/workflows/ui-diff-approve.yml."
     required: false
     default: comment
   working-directory:
@@ -56,6 +57,14 @@ inputs:
     description: Seconds to wait for each dev server to answer.
     required: false
     default: "180"
+  require-approval:
+    description: "true: design review gate. Sets the ui-diff/design-review commit status to pending when anything changed (success when nothing did) and adds a \"Design approved\" box to the comment. Needs `statuses: write`."
+    required: false
+    default: "false"
+  approval-label:
+    description: PR label that also approves the UI changes (with require-approval). Use the same value in the approve workflow.
+    required: false
+    default: design-approved
   github-token:
     description: Token for pushing the assets branch and posting. Needs contents and pull-requests write.
     required: false
@@ -93,7 +102,7 @@ runs:
     # Cache the toolchain (Playwright + Chromium), keyed on the script that installs it.
     # Skipped for cleanup runs and fork PRs, which don't capture anything.
     - id: key
-      if: inputs.mode != 'prune' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+      if: inputs.mode != 'prune' && inputs.mode != 'approve' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
       shell: bash
       run: |
         echo "hash=$(node -e 'console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex").slice(0, 16))' "$GITHUB_ACTION_PATH/skills/ui-diff/scripts/setup.sh")" >> "$GITHUB_OUTPUT"
@@ -119,5 +128,7 @@ runs:
         UI_DIFF_SUMMARY: ${{ inputs.summary }}
         UI_DIFF_BRANCH: ${{ inputs.assets-branch }}
         UI_DIFF_SERVER_TIMEOUT: ${{ inputs.server-timeout }}
+        UI_DIFF_REQUIRE_APPROVAL: ${{ inputs.require-approval }}
+        UI_DIFF_APPROVAL_LABEL: ${{ inputs.approval-label }}
         GH_TOKEN: ${{ inputs.github-token }}
       run: bash "$GITHUB_ACTION_PATH/action/ci.sh"

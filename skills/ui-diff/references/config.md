@@ -24,7 +24,8 @@ Saves what you'd otherwise rediscover every run. Everything is optional.
   "fullPage": true,
   "settleMs": 300,
   "storageState": ".ui-diff/auth.json",
-  "post": "comment"
+  "post": "comment",
+  "requireApproval": false
 }
 ```
 
@@ -44,6 +45,7 @@ Saves what you'd otherwise rediscover every run. Everything is optional.
 | `colorSchemes` | `["light"]` by default. Add `"dark"` if the app supports it. |
 | `storageState` | Playwright auth state for pages behind login (see below). |
 | `post` | Default destination: `"comment"`, `"description"` or `"manual"`. |
+| `requireApproval` | `true` if the repo gates UI changes on a design sign-off (the Action's `require-approval` with `ui-diff-approve.yml`). The agent then passes `--approval` to `comment.cjs`, which adds a "Design approved" box tied to the head commit. |
 | `storybook` | `true` to always diff Storybook stories instead of pages (see `route-mapping.md`), or an object with any of: `dir` (package holding `.storybook/`, e.g. `"packages/ui"`), `command` (with `{port}`; default: the `storybook` script, else `storybook dev -p {port} --ci`), `stories` (ids always captured, `*` allowed), `viewports` (default 1024×768 + iPhone 13; top-level `viewports` are for pages), `max` (cap on picked stories, default 40). `mask`, `hide`, `css` and `colorSchemes` apply to stories too. |
 
 ## Pages behind login

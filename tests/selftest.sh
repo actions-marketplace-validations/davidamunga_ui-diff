@@ -357,6 +357,123 @@ ci "$TMP/ci-closed.err"
 check "closed PR → exits 0 (prunes, no routes needed)" test $? = 0
 check "closed PR's images removed" bash -c "! git --git-dir='$TMP/remote.git' cat-file -e ui-diff-assets:pr-7"
 
+section "e2e: design review gate (require-approval, mode approve, stateful stub gh)"
+# The stub keeps the PR head, who can write, comments and statuses in $GHS/state.json.
+GHS="$TMP/ghs"; mkdir -p "$GHS" "$TMP/bin-review"
+printf '#!/usr/bin/env bash\nexec node "%s" "$@"\n' "$HERE/gh-stub.cjs" > "$TMP/bin-review/gh"
+chmod +x "$TMP/bin-review/gh"
+echo "{\"head\":\"$HEAD_SHA\",\"perms\":{\"alice\":\"write\",\"mo\":\"maintain\",\"bob\":\"read\"}}" > "$GHS/state.json"
+RPATH="$TMP/bin-review:$PATH"
+set_head() { node -e 'const fs=require("fs"),f=process.argv[1],s=require(f); s.head=process.argv[2]; fs.writeFileSync(f, JSON.stringify(s))' "$GHS/state.json" "$1"; }
+# Latest ui-diff/design-review status for a sha, and the comment body, as files for expect.
+review_status() { node -e 'const s=require(process.argv[1]); console.log(JSON.stringify((s.statuses[process.argv[2]]||[]).find((x) => x.context === "ui-diff/design-review") || {}))' "$GHS/state.json" "$1" > "$TMP/rs.json"; }
+comment_body() { node -e 'const s=require(process.argv[1]); process.stdout.write(Object.values(s.comments)[0].body)' "$GHS/state.json" > "$TMP/rc.md"; }
+pr_event() { # pr_event <action> <head sha> [labels json] [label name] [sender]
+  node -e 'const [a, sha, base, labels, label, sender] = process.argv.slice(1);
+    console.log(JSON.stringify({ action: a, number: 8, sender: { login: sender }, label: label ? { name: label } : undefined,
+      pull_request: { number: 8, base: { sha: base }, head: { sha, repo: { full_name: "acme/demo" } }, labels: JSON.parse(labels) } }))' \
+    "$1" "$2" "$BASE_SHA" "${3:-[]}" "${4:-}" "${5:-alice}" > "$TMP/event.json"
+}
+tick_event() { # tick_event <sender> x|' ': issue_comment edited, the stored comment's box set to that
+  node -e 'const fs = require("fs"); const f = process.argv[1], s = require(f), c = Object.values(s.comments)[0];
+    const [sender, to, out] = process.argv.slice(2);
+    const set = (v) => c.body.replace(/^- \[[ xX]\] \*\*Design approved\*\*/m, (l) => l.replace(/\[[ xX]\]/, `[${v}]`));
+    const e = { action: "edited", sender: { login: sender }, issue: { number: 8, pull_request: {} },
+      comment: { id: c.id, html_url: c.html_url, user: c.user, body: set(to) }, changes: { body: { from: set(to === "x" ? " " : "x") } } };
+    fs.writeFileSync(out, JSON.stringify(e));
+    c.body = e.comment.body; fs.writeFileSync(f, JSON.stringify(s)); // the edit lands before the webhook' \
+    "$GHS/state.json" "$1" "$2" "$TMP/event.json"
+}
+approve() { ci "$TMP/ap.err" PATH="$RPATH" GH_STATE="$GHS" UI_DIFF_MODE=approve; }
+posts() { grep -c 'statuses/' "$GHS/calls.log" 2>/dev/null || true; }
+
+pr_event synchronize "$HEAD_SHA"
+ci "$TMP/rv-none.err" PATH="$RPATH" GH_STATE="$GHS" UI_DIFF_ROUTES="/about.html" UI_DIFF_REQUIRE_APPROVAL=true
+check "no visual changes → ci.sh exits 0" test $? = 0
+review_status "$HEAD_SHA"
+expect "$TMP/rs.json" 'd.state === "success" && d.description === "No visual changes" && has(d.target_url, "#issuecomment-")' "no visual changes → success, linked to the comment"
+comment_body
+expect "$TMP/rc.md" '!has(d, "Design approved") && !has(d, "ui-diff:review")' "no approval box when nothing changed"
+
+pr_event synchronize "$HEAD_SHA" '[{"name":"design-approved"}]'
+ci "$TMP/rv-changed.err" PATH="$RPATH" GH_STATE="$GHS" UI_DIFF_ROUTES="/,/pricing.html" UI_DIFF_REQUIRE_APPROVAL=true
+check "visual changes → ci.sh exits 0" test $? = 0
+review_status "$HEAD_SHA"
+expect "$TMP/rs.json" 'd.state === "pending" && d.description === "2 pages changed — needs design review" && has(d.target_url, "#issuecomment-100")' "visual changes → pending with a count, linked to the comment"
+comment_body
+expect "$TMP/rc.md" "has(d, '<!-- ui-diff:review sha=$HEAD_SHA pages=2 failed=0 -->') && has(d, '- [ ] **Design approved** — tick to approve these UI changes')" "comment has an unticked box tied to the head sha"
+expect "$GHS/calls.log" 'has(d, "-X DELETE repos/acme/demo/issues/8/labels/design-approved")' "drops an approval label left from an earlier commit"
+N="$(posts)"
+
+tick_event bob x; approve
+check "read-only user → exits 0" test $? = 0
+expect "$TMP/ap.err" 'has(d, "@bob doesn\x27t have write access")' "read-only user's tick is ignored"
+check "read-only user → no status change" test "$(posts)" = "$N"
+tick_event bob ' '
+
+tick_event alice x; approve
+review_status "$HEAD_SHA"
+expect "$TMP/rs.json" 'd.state === "success" && d.description === "Approved by @alice" && has(d.target_url, "#issuecomment-100")' "writer ticks → success, approved by them"
+comment_body
+expect "$TMP/rc.md" "has(d, '- [x] **Design approved**') && has(d, '✅ Approved by @alice for \`${HEAD_SHA:0:7}\`')" "comment gets the approval line"
+expect "$GHS/calls.log" 'has(d, "collaborators/alice/permission")' "looked up the editor's permission"
+
+N="$(posts)"
+node -e 'const fs=require("fs"),f=process.argv[1],e=require(f); e.changes.body.from=e.comment.body; fs.writeFileSync(f, JSON.stringify(e))' "$TMP/event.json"
+approve
+expect "$TMP/ap.err" 'has(d, "didn\x27t change")' "an edit that doesn't flip the box is ignored"
+check "…and sets no status" test "$(posts)" = "$N"
+
+tick_event mo ' '; approve
+review_status "$HEAD_SHA"
+expect "$TMP/rs.json" 'd.state === "pending" && d.description === "2 pages changed — needs design review"' "maintainer unticks → back to pending"
+comment_body
+expect "$TMP/rc.md" '!has(d, "Approved by") && has(d, "- [ ] **Design approved**")' "approval line removed"
+
+# Stale: the PR moved on to a new commit while the old comment is still up.
+NEW_SHA="ffffffffffffffffffffffffffffffffffffffff"
+set_head "$NEW_SHA"
+N="$(posts)"
+tick_event alice x; approve
+expect "$TMP/ap.err" 'has(d, "(stale)")' "tick on a comment for an old sha is ignored"
+check "stale tick → no status on any sha" test "$(posts)" = "$N"
+review_status "$NEW_SHA"
+expect "$TMP/rs.json" '!d.state' "new sha not approved"
+pr_event labeled "$NEW_SHA" '[{"name":"design-approved"}]' design-approved alice; approve
+expect "$TMP/ap.err" 'has(d, "(stale)")' "label on a PR whose result is for an old sha is ignored"
+tick_event alice ' '
+set_head "$HEAD_SHA"
+
+# Label approval.
+pr_event labeled "$HEAD_SHA" '[{"name":"design-approved"}]' design-approved bob; approve
+expect "$TMP/ap.err" 'has(d, "@bob doesn\x27t have write access")' "label by a read-only user is ignored"
+pr_event labeled "$HEAD_SHA" '[{"name":"bug"}]' bug alice; approve
+expect "$TMP/ap.err" 'has(d, "isn\x27t \x27design-approved\x27")' "other labels are ignored"
+pr_event labeled "$HEAD_SHA" '[{"name":"design-approved"}]' design-approved alice; approve
+review_status "$HEAD_SHA"
+expect "$TMP/rs.json" 'd.state === "success" && d.description === "Approved by @alice"' "approval label → success"
+comment_body
+expect "$TMP/rc.md" 'has(d, "- [x] **Design approved**") && has(d, "✅ Approved by @alice")' "label approval ticks the box"
+
+# A re-run on the same commit keeps the approval.
+ci "$TMP/rv-rerun.err" PATH="$RPATH" GH_STATE="$GHS" UI_DIFF_ROUTES="/,/pricing.html" UI_DIFF_REQUIRE_APPROVAL=true
+review_status "$HEAD_SHA"
+expect "$TMP/rs.json" 'd.state === "success" && d.description === "Approved by @alice"' "re-run on an approved sha keeps the approval"
+comment_body
+expect "$TMP/rc.md" 'has(d, "- [x] **Design approved**") && has(d, "✅ Approved by @alice")' "…and renders the box ticked"
+
+pr_event unlabeled "$HEAD_SHA" '[]' design-approved alice; approve
+review_status "$HEAD_SHA"
+expect "$TMP/rs.json" 'd.state === "pending"' "removing the label → back to pending"
+
+pr_event labeled "$HEAD_SHA" '[{"name":"design-approved"}]' design-approved 'github-actions[bot]'; approve
+expect "$TMP/ap.err" 'has(d, "made by github-actions[bot] itself")' "the bot's own edits never approve"
+if python3 -c 'import yaml' 2>/dev/null; then
+  for y in "$HERE/../action.yml" "$HERE"/../examples/workflows/*.yml; do
+    check "$(basename "$y") parses" python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$y"
+  done
+fi
+
 # ---------------------------------------------------------------------------------
 section "e2e: non-visual change → no false positives (determinism)"
 cd "$REPO"

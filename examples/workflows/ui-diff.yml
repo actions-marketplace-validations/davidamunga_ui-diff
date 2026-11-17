@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write        # push screenshots to the ui-diff-assets branch
   pull-requests: write   # add / update the PR comment
+  # statuses: write      # with require-approval: the ui-diff/design-review status
 
 # A newer push replaces a run that's still going.
 concurrency:
@@ -39,6 +40,7 @@ jobs:
           # viewports: desktop:1440x900,mobile:iPhone 13
           # color-schemes: light,dark
           # mode: description         # put it in the PR description instead of a comment
+          # require-approval: true      # design review gate; add ui-diff-approve.yml too
 
       # Optional: keep the full report and the server/capture logs.
       - uses: actions/upload-artifact@v4

@@ -5,8 +5,12 @@
 # payload, local bare remote, stub gh).
 #
 # Inputs come from env (action.yml maps them): UI_DIFF_MODE, UI_DIFF_ROUTES, UI_DIFF_DEV,
-# UI_DIFF_VIEWPORTS, UI_DIFF_SCHEMES, UI_DIFF_BASE, UI_DIFF_CONFIG, UI_DIFF_SUMMARY, plus
-# GH_TOKEN and the standard GITHUB_* variables. Outputs go to $GITHUB_OUTPUT.
+# UI_DIFF_VIEWPORTS, UI_DIFF_SCHEMES, UI_DIFF_BASE, UI_DIFF_CONFIG, UI_DIFF_SUMMARY,
+# UI_DIFF_REQUIRE_APPROVAL, UI_DIFF_APPROVAL_LABEL, plus GH_TOKEN and the standard GITHUB_*
+# variables. Outputs go to $GITHUB_OUTPUT.
+#
+# Design review gate (require-approval): sets the ui-diff/design-review commit status (see
+# review.cjs). mode=approve handles a ticked box / label: API calls only, no checkout.
 set -euo pipefail
 
 S="$(cd "$(dirname "$0")/../skills/ui-diff/scripts" && pwd)"
@@ -27,7 +31,19 @@ retry() {
   return 1
 }
 
-case "$MODE" in comment|description|prune) ;; *) fail "mode must be comment, description or prune (got '$MODE')" ;; esac
+case "$MODE" in comment|description|prune|approve) ;; *) fail "mode must be comment, description, prune or approve (got '$MODE')" ;; esac
+APPROVAL=false
+case "${UI_DIFF_REQUIRE_APPROVAL:-false}" in true|1|yes) APPROVAL=true ;; esac
+LABEL="${UI_DIFF_APPROVAL_LABEL:-design-approved}"
+
+# --- approve: issue_comment edited / pull_request labeled. Never touches PR code. ------
+if [ "$MODE" = approve ]; then
+  [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ] || fail "no GitHub event payload"
+  export GH_REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY not set}"
+  node "$S/review.cjs" event --event "$GITHUB_EVENT_PATH" --label "$LABEL" ||
+    fail "couldn't update the design review. The workflow needs 'permissions: statuses: write' and 'pull-requests: write'."
+  exit 0
+fi
 
 # --- the PR -----------------------------------------------------------------------
 [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ] || fail "no GitHub event payload; run this action on pull_request events"
@@ -109,11 +125,23 @@ PREFIX="$(retry bash "$S/publish.sh" "$R" "$PR" "${HEAD_SHA:0:7}")" ||
 
 SUM=(--auto-summary)
 [ -z "${UI_DIFF_SUMMARY:-}" ] || { [ -f "$UI_DIFF_SUMMARY" ] && SUM=(--summary "$UI_DIFF_SUMMARY"); } || note "summary file $UI_DIFF_SUMMARY not found; using the automatic summary"
-node "$S/comment.cjs" --report "$R" --base-url "$PREFIX" "${SUM[@]}" --out "$ROOT/.ui-diff/comment.md"
+REVIEW=()
+if [ "$APPROVAL" = true ]; then
+  REVIEW=(--approval "$HEAD_SHA" --label "$LABEL")
+  [ "$MODE" = comment ] || REVIEW+=(--no-checkbox)
+fi
+node "$S/comment.cjs" --report "$R" --base-url "$PREFIX" "${SUM[@]}" ${REVIEW[@]+"${REVIEW[@]}"} --out "$ROOT/.ui-diff/comment.md"
+# A re-run of an already-approved commit keeps the approval (box ticked).
+[ "$APPROVAL" = false ] || node "$S/review.cjs" carry --sha "$HEAD_SHA" --body "$ROOT/.ui-diff/comment.md"
 
 URL="$(node "$S/post.cjs" --pr "$PR" --body "$ROOT/.ui-diff/comment.md" --mode "$MODE")" ||
   fail "couldn't post to PR #$PR. The workflow needs 'permissions: pull-requests: write'."
 URL="$(echo "$URL" | tail -n 1)"
 output comment-url "$URL"
 note "posted: $URL"
+# Statuses go on after the post, so the target link exists; a box ticked in between is kept.
+if [ "$APPROVAL" = true ]; then
+  node "$S/review.cjs" status --sha "$HEAD_SHA" --report "$R" --target "$URL" --event "$GITHUB_EVENT_PATH" --label "$LABEL" ||
+    fail "couldn't set the ui-diff/design-review status. The workflow needs 'permissions: statuses: write'."
+fi
 step_summary "ui-diff: $COUNTS — $URL"
