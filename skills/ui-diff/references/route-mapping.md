@@ -61,3 +61,29 @@ A plain page load won't show a modal or an open dropdown. Note this in the repor
 ("the change to `ConfirmDialog` isn't visible on any initial page load") rather than
 silently reporting "no change". If it matters, the user can add a `route` with `actions`
 to `.ui-diff.json` (see `config.md`).
+
+## Storybook projects: diff stories instead of pages
+
+If the repo has a `.storybook/` folder (or a `storybook` script in `package.json`) and the
+change is to components, run in Storybook mode: `run.sh --storybook`. It starts Storybook
+for base and head, reads each one's story index (`/index.json`, or `/stories.json` on v6)
+and picks stories with `scripts/stories.cjs`:
+
+| Changed file | Stories picked |
+|---|---|
+| A story file (`Button.stories.tsx`) | All stories in it |
+| Same base name (`Button.tsx`, `button.module.css`, `Button/index.tsx`) | That component's stories |
+| A file a story imports, up to 5 levels (`tokens.css` ← `Button.tsx` ← `Card.stories.tsx`) | Those stories |
+| Any other UI file matching none of the above | Stories in the same folder |
+| `.storybook/*` (preview, decorators, global CSS) | Every story (capped at 40) |
+
+Each story is captured at `iframe.html?id=<id>&viewMode=story`, named by its id, at a
+smaller default viewport (1024×768 + iPhone 13). A story only on head is reported as new,
+one only on base as removed, and a story that fails to render gets a warning. Changed files
+no story covers are logged as `no story found for: …`. Imports through package names
+(`@acme/ui`) or aliases other than `@/` and `~/` aren't followed; then pass ids yourself:
+`--stories "button--primary,card--*"`.
+
+Prefer pages when the change is to routes, layouts or app-level styles, or when the PR is
+about how a screen looks: stories isolate components, so they miss page-level layout
+effects. When both matter, do one run of each and combine the summaries.

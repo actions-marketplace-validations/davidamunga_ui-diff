@@ -73,6 +73,8 @@ Just ask:
 
 > ui diff for PR #482, put it in the description
 
+> show the Button changes in Storybook
+
 To save the routes, dev command, masks for dynamic content, and login state for future
 runs, add a `.ui-diff.json` file. See [`skills/ui-diff/references/config.md`](skills/ui-diff/references/config.md).
 
@@ -90,7 +92,7 @@ writes the comment and opens the image folder, and you drag the images into GitH
 
 ```bash
 tests/selftest.sh          # ~30s: unit checks + full pipeline on a static fixture site (no network)
-tests/selftest.sh --full   # ~45s more: also scaffolds and diffs a real Vite + React app
+tests/selftest.sh --full   # ~1 min more: also scaffolds and diffs a real Vite + React app and a Storybook
 tests/selftest.sh --keep   # keep the temp repos for inspection
 ```
 
@@ -114,6 +116,7 @@ skills/ui-diff/
 │   ├── setup.sh                one-time toolchain install
 │   ├── devcmd.cjs              detect the dev-server command and port flag
 │   ├── linkdeps.cjs            reuse installed deps in a worktree without sharing build caches
+│   ├── stories.cjs             Storybook mode: changed files → stories to capture
 │   ├── capture.cjs             deterministic screenshots + computed-style snapshots
 │   ├── diff.cjs                pixel diff, changed regions, zoom crops
 │   ├── stylediff.cjs           measured style/layout/copy/contrast changes

@@ -5,11 +5,14 @@
 #
 # Usage: run.sh [--base <ref>] [--head <ref>] [--routes "/,/pricing"] [--viewports "desktop:1440x900,mobile:iPhone 13"]
 #               [--schemes light,dark] [--dev "<command with {port}>"] [--config <file>] [--keep]
+#               [--storybook [--stories "id1,id2"]]
 #
 #   --base   default: the open PR's base branch, else origin's default branch, else main/master
 #   --head   a commit/ref to render instead of the working tree (use the PR's head SHA when
 #            posting to a PR, so the report shows exactly what's pushed)
 #   --keep   leave servers' worktrees in place afterwards (for debugging)
+#   --storybook  diff Storybook stories instead of pages (also config "storybook": true); the
+#            stories are picked from the changed files (stories.cjs), or given with --stories
 #
 # Output: .ui-diff/report/ — results.json, run.json, measured.md and the images.
 # Servers are started in their own process groups and only those groups are stopped;
@@ -20,7 +23,7 @@ S="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 WORK="$ROOT/.ui-diff"
-BASE_ARG="" HEAD_ARG="" ROUTES="" VIEWPORTS="" SCHEMES="" DEV="" KEEP=0
+BASE_ARG="" HEAD_ARG="" ROUTES="" VIEWPORTS="" SCHEMES="" DEV="" KEEP=0 SB=0 STORIES=""
 CONFIG=""; [ -f "$ROOT/.ui-diff.json" ] && CONFIG="$ROOT/.ui-diff.json"
 
 while [ $# -gt 0 ]; do
@@ -33,6 +36,8 @@ while [ $# -gt 0 ]; do
     --dev) DEV="$2"; shift 2 ;;
     --config) CONFIG="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2 ;;
     --keep) KEEP=1; shift ;;
+    --storybook) SB=1; shift ;;
+    --stories) STORIES="$2"; SB=1; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -44,6 +49,14 @@ cfg() {
   [ -n "$CONFIG" ] || return 0
   node -e 'const v=require(process.argv[1])[process.argv[2]];if(v!==undefined)console.log(Array.isArray(v)?v.join("\n"):v)' "$CONFIG" "$1"
 }
+# Storybook config: "storybook": true or { "dir": "packages/ui", "command": "...", ... }.
+sbcfg() {
+  [ -n "$CONFIG" ] || return 0
+  node -e 'const s=require(process.argv[1]).storybook;if(!s)process.exit();const v=process.argv[2]==="on"?1:(s===true?{}:s)[process.argv[2]];if(v!==undefined)console.log(v)' "$CONFIG" "$1"
+}
+[ -n "$(sbcfg on)" ] && SB=1
+SB_DIR="$(sbcfg dir)"; SB_DIR="${SB_DIR%/}"
+APP="${SB_DIR:+/$SB_DIR}" # the app's dir inside each checkout (Storybook may live in a sub-package)
 
 # --- tools & local ignore ---------------------------------------------------------
 bash "$S/setup.sh" >/dev/null
@@ -94,13 +107,15 @@ copy_untracked() {
 
 lockfile() { for l in pnpm-lock.yaml yarn.lock package-lock.json bun.lock bun.lockb; do [ -f "$1/$l" ] && { echo "$l"; return; }; done; }
 
+# prepare_deps <checkout> [/sub/dir]: install or link deps in the checkout (or a package inside it).
 prepare_deps() {
-  local dst="$1" lock install
+  local dst="$1${2:-}" src="$ROOT${2:-}" name; name="$(basename "$1")"
+  local lock install
   [ -f "$dst/package.json" ] || return 0
   lock="$(lockfile "$dst")"
-  if [ -d "$ROOT/node_modules" ] && [ -n "$lock" ] && cmp -s "$ROOT/$lock" "$dst/$lock"; then
+  if [ -d "$src/node_modules" ] && [ -n "$lock" ] && cmp -s "$src/$lock" "$dst/$lock"; then
     log "same $lock as working tree — reusing installed dependencies"
-    node "$S/linkdeps.cjs" "$ROOT" "$dst" >&2
+    node "$S/linkdeps.cjs" "$src" "$dst" >&2
     return
   fi
   install="$(cfg install)"
@@ -113,9 +128,9 @@ prepare_deps() {
       *) install="npm install" ;;
     esac
   fi
-  log "lockfile differs — running '$install' in $(basename "$dst") (log: $WORK/install-$(basename "$dst").log)"
-  (cd "$dst" && eval "$install") > "$WORK/install-$(basename "$dst").log" 2>&1 ||
-    { tail -n 30 "$WORK/install-$(basename "$dst").log" >&2; die "dependency install failed in $dst"; }
+  log "lockfile differs — running '$install' in $name${2:-} (log: $WORK/install-$name.log)"
+  (cd "$dst" && eval "$install") > "$WORK/install-$name.log" 2>&1 ||
+    { tail -n 30 "$WORK/install-$name.log" >&2; die "dependency install failed in $dst"; }
 }
 
 if [ -z "$HEAD_ARG" ] && [ -f package.json ] && [ ! -d node_modules ]; then
@@ -126,19 +141,29 @@ BASE_DIR="$WORK/base"
 add_worktree "$BASE_DIR" "$BASE_SHA"
 copy_untracked "$BASE_DIR"
 prepare_deps "$BASE_DIR"
+# A Storybook in a sub-package with its own deps (not a workspace of the root).
+[ -n "$APP" ] && [ ! -e "$BASE_DIR$APP/node_modules" ] && prepare_deps "$BASE_DIR" "$APP"
 if [ -n "$HEAD_ARG" ]; then
   HEAD_DIR="$WORK/head"
   add_worktree "$HEAD_DIR" "$HEAD_SHA"
   copy_untracked "$HEAD_DIR"
   prepare_deps "$HEAD_DIR"
+  [ -n "$APP" ] && [ ! -e "$HEAD_DIR$APP/node_modules" ] && prepare_deps "$HEAD_DIR" "$APP"
 else
   HEAD_DIR="$ROOT"
 fi
 
 # --- servers ----------------------------------------------------------------------
-[ -n "$DEV" ] || DEV="$(cfg devCommand)"
-[ -n "$DEV" ] || DEV="$(node "$S/devcmd.cjs" "$HEAD_DIR")" || die "couldn't detect the dev command; pass --dev \"<command with {port}>\""
-READY="$(cfg readyPath)"; READY="${READY:-/}"
+if [ "$SB" = 1 ]; then
+  [ -n "$DEV" ] || DEV="$(sbcfg command)"
+  [ -n "$DEV" ] || DEV="$(node "$S/devcmd.cjs" "$HEAD_DIR$APP" --storybook)" || die "couldn't find Storybook in ${SB_DIR:-the repo root}; pass --dev \"<command with {port}>\" or set storybook.dir"
+  READY=/index.json
+  export STORYBOOK_DISABLE_TELEMETRY=1
+else
+  [ -n "$DEV" ] || DEV="$(cfg devCommand)"
+  [ -n "$DEV" ] || DEV="$(node "$S/devcmd.cjs" "$HEAD_DIR")" || die "couldn't detect the dev command; pass --dev \"<command with {port}>\""
+  READY="$(cfg readyPath)"; READY="${READY:-/}"
+fi
 TIMEOUT="${UI_DIFF_SERVER_TIMEOUT:-180}"
 log "dev command: $DEV"
 
@@ -183,8 +208,8 @@ BASE_PORT="$(free_port)"
 HEAD_PORT="$(free_port)"
 while [ "$HEAD_PORT" = "$BASE_PORT" ]; do HEAD_PORT="$(free_port)"; done
 log "starting base on :$BASE_PORT and head on :$HEAD_PORT"
-start_server "$BASE_DIR" "$BASE_PORT" base
-start_server "$HEAD_DIR" "$HEAD_PORT" head
+start_server "$BASE_DIR$APP" "$BASE_PORT" base
+start_server "$HEAD_DIR$APP" "$HEAD_PORT" head
 wait_ready "${PGIDS[0]}" "$BASE_PORT" base &
 W1=$!
 wait_ready "${PGIDS[1]}" "$HEAD_PORT" head &
@@ -192,6 +217,25 @@ W2=$!
 wait "$W1" || exit 1
 wait "$W2" || exit 1
 
+CAP_BASE=() CAP_HEAD=()
+if [ "$SB" = 1 ]; then
+  # Changed files (committed, plus uncommitted when head is the working tree), relative to the Storybook dir.
+  if [ -n "$HEAD_ARG" ]; then git diff --name-only "$BASE_SHA" "$HEAD_SHA"; else git diff --name-only "$BASE_SHA"; git ls-files --others --exclude-standard; fi |
+    node -e 'const p=require("path").posix,d=process.argv[1];for(const f of require("fs").readFileSync(0,"utf8").split("\n"))if(f)console.log(p.relative(d||".",f))' "$SB_DIR" > "$WORK/changed.txt"
+  SBA=(--base "http://localhost:$BASE_PORT" --head "http://localhost:$HEAD_PORT" --changed "$WORK/changed.txt"
+    --root-head "$HEAD_DIR$APP" --root-base "$BASE_DIR$APP" --out "$WORK")
+  [ -n "$STORIES" ] && SBA+=(--stories "$STORIES")
+  [ -n "$CONFIG" ] && SBA+=(--config "$CONFIG")
+  node "$S/stories.cjs" "${SBA[@]}" > "$WORK/stories.json" || die "couldn't read the stories index (log: $WORK/server-head.log)"
+  node -e 'const r=require(process.argv[1]);for(const s of r.stories)console.error(`› story ${s.id}: ${s.reason}${s.only?` (${s.only} only)`:""}`);if(r.omitted)console.error(`› ${r.omitted} more stories matched; capped (pass --stories to choose)`);if(r.unmatched.length)console.error(`› no story found for: ${r.unmatched.join(", ")}`)' "$WORK/stories.json"
+  [ "$(node -e 'console.log(require(process.argv[1]).stories.length)' "$WORK/stories.json")" != 0 ] ||
+    die "no stories match the changed files; pass --stories \"<id>,<id>\" (ids look like: $(node -e 'console.log(require(process.argv[1]).sample.join(", "))' "$WORK/stories.json"))"
+  CAP_BASE=(--config "$WORK/capture-base.json") CAP_HEAD=(--config "$WORK/capture-head.json")
+  # Builders compile the preview on first load; warm it once per side.
+  curl -s -o /dev/null --max-time 120 "http://localhost:$BASE_PORT/iframe.html" & W1=$!
+  curl -s -o /dev/null --max-time 120 "http://localhost:$HEAD_PORT/iframe.html" & W2=$!
+  wait "$W1" "$W2" || true
+else
 # Dev servers often compile a route on first request; warm every route so captures don't time out.
 CFG_ROUTES=""
 [ -n "$CONFIG" ] && CFG_ROUTES="$(node -e 'for (const r of require(process.argv[1]).routes || []) console.log(typeof r === "string" ? r : r.path)' "$CONFIG")"
@@ -204,18 +248,21 @@ for r in $ROUTE_LIST; do
   curl -s -o /dev/null --max-time 120 "http://localhost:$HEAD_PORT$r" & WARM+=("$!")
 done
 wait "${WARM[@]}" || true
+fi
 
 # --- capture & diff ---------------------------------------------------------------
 rm -rf "$WORK/shots" "$WORK/report"
 CAP=()
-[ -n "$ROUTES" ] && CAP+=(--routes "$ROUTES")
-[ -n "$CONFIG" ] && CAP+=(--config "$CONFIG")
+if [ "$SB" = 0 ]; then
+  [ -n "$ROUTES" ] && CAP+=(--routes "$ROUTES")
+  [ -n "$CONFIG" ] && CAP_BASE=(--config "$CONFIG") CAP_HEAD=(--config "$CONFIG")
+fi
 [ -n "$VIEWPORTS" ] && CAP+=(--viewports "$VIEWPORTS")
 [ -n "$SCHEMES" ] && CAP+=(--schemes "$SCHEMES")
 log "capturing…"
-node "$S/capture.cjs" --url "http://localhost:$BASE_PORT" --out "$WORK/shots/before" "${CAP[@]}" 2> "$WORK/capture-base.log" > /dev/null &
+node "$S/capture.cjs" --url "http://localhost:$BASE_PORT" --out "$WORK/shots/before" ${CAP_BASE[@]+"${CAP_BASE[@]}"} ${CAP[@]+"${CAP[@]}"} 2> "$WORK/capture-base.log" > /dev/null &
 C1=$!
-node "$S/capture.cjs" --url "http://localhost:$HEAD_PORT" --out "$WORK/shots/after" "${CAP[@]}" 2> "$WORK/capture-head.log" > /dev/null &
+node "$S/capture.cjs" --url "http://localhost:$HEAD_PORT" --out "$WORK/shots/after" ${CAP_HEAD[@]+"${CAP_HEAD[@]}"} ${CAP[@]+"${CAP[@]}"} 2> "$WORK/capture-head.log" > /dev/null &
 C2=$!
 wait "$C1" || { cat "$WORK/capture-base.log" >&2; die "base capture failed"; }
 wait "$C2" || { cat "$WORK/capture-head.log" >&2; die "head capture failed"; }
@@ -224,14 +271,14 @@ SUMMARY="$(node "$S/diff.cjs" --before "$WORK/shots/before" --after "$WORK/shots
 node "$S/stylediff.cjs" --before "$WORK/shots/before" --after "$WORK/shots/after" --report "$WORK/report" > /dev/null
 
 node -e '
-const [out, baseRef, baseSha, headRef, headSha, dirty, basePort, headPort] = process.argv.slice(1);
-const m = require(out + "/../shots/after/manifest.json");
+const [out, baseRef, baseSha, headRef, headSha, dirty, basePort, headPort, sb] = process.argv.slice(1);
+const m = [...require(out + "/../shots/after/manifest.json"), ...require(out + "/../shots/before/manifest.json")];
 require("fs").writeFileSync(out + "/run.json", JSON.stringify({
   base: { ref: baseRef, sha: baseSha }, head: { ref: headRef || "working tree", sha: headSha, dirty: dirty === "true" },
   routes: [...new Set(m.map((e) => e.route))], viewports: [...new Set(m.map((e) => e.viewport))], schemes: [...new Set(m.map((e) => e.scheme))],
-  ports: { base: Number(basePort), head: Number(headPort) },
+  ports: { base: Number(basePort), head: Number(headPort) }, ...(sb === "1" ? { storybook: true } : {}),
 }, null, 2));
-' "$WORK/report" "$BASE_REF" "$BASE_SHA" "$HEAD_ARG" "$HEAD_SHA" "$HEAD_DIRTY" "$BASE_PORT" "$HEAD_PORT"
+' "$WORK/report" "$BASE_REF" "$BASE_SHA" "$HEAD_ARG" "$HEAD_SHA" "$HEAD_DIRTY" "$BASE_PORT" "$HEAD_PORT" "$SB"
 
 log "done — $WORK/report"
 echo "$SUMMARY"

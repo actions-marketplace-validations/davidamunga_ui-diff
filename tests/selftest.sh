@@ -3,7 +3,7 @@
 # tests/fixtures, runs the real pipeline against them, and checks the results.
 #
 # Usage: tests/selftest.sh [--full] [--keep]
-#   --full   also scaffold a real Vite + React app (needs network; adds ~30s)
+#   --full   also scaffold a real Vite + React app and a Storybook (needs network; adds ~1 min)
 #   --keep   keep the temp dir for inspection (path is printed)
 #
 # The fast tier needs python3 (static file server), node, git. No network after the
@@ -81,6 +81,33 @@ check "vite + npm"   test "$(node "$S/devcmd.cjs" "$TMP/dc/vite")" = "npm run de
 check "next + pnpm"  test "$(node "$S/devcmd.cjs" "$TMP/dc/next")" = "pnpm run dev -p {port}"
 check "static html"  test "$(node "$S/devcmd.cjs" "$TMP/dc/static")" = "python3 -m http.server {port}"
 check "nothing to run → error" bash -c "! node '$S/devcmd.cjs' '$TMP/dc/none'"
+
+section "unit: Storybook story picking (stories.cjs)"
+SBF="$FIX/storybook"
+# pick <changed files...> → sorted story ids (fixture index.json files, sources read from the fixture)
+pick() {
+  printf '%s\n' "$@" > "$TMP/sb-changed.txt"
+  node "$S/stories.cjs" --base "$SBF/index-base.json" --head "$SBF/index-head.json" --changed "$TMP/sb-changed.txt" \
+    --root-head "$SBF" --out "$TMP/sb" | node -e 'const r=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(r.stories.map((s)=>s.id).sort().join(",")+(r.unmatched.length?" ?"+r.unmatched.join(","):""))'
+}
+check "changed story file → its stories" test "$(pick src/components/Header.stories.tsx)" = "header--logged-in,header--logged-out"
+check "same base name (Button.module.css) + importers (Card)" test "$(pick src/components/Button.module.css)" = "button--primary,button--secondary,card--default"
+check "index.tsx counts as its folder name" test "$(pick src/components/Card/index.tsx)" = "card--default"
+check "unimported file → stories in the same folder" test "$(pick src/components/Icon.tsx)" = "badge--default,button--primary,button--secondary,header--logged-in,header--logged-out"
+check ".storybook/ change → every story, no docs entries" test "$(pick .storybook/preview.ts | tr ',' '\n' | wc -l | tr -d ' ')" = 6
+check "unrelated file → nothing, reported as unmatched" test "$(pick src/lib/format.ts README.md)" = " ?src/lib/format.ts"
+pick src/components/Badge.stories.tsx src/components/Header.stories.tsx > /dev/null
+expect "$TMP/sb/capture-head.json" 'd.routes.some((r) => r.name === "badge--default") && !d.routes.some((r) => r.name === "header--logged-out")' "head config: new story in, base-only story out"
+expect "$TMP/sb/capture-base.json" '!d.routes.some((r) => r.name === "badge--default") && d.routes.some((r) => r.name === "header--logged-out")' "base config: the reverse (diff.cjs then reports new / removed)"
+expect "$TMP/sb/capture-head.json" 'd.routes[0].path.startsWith("/iframe.html?id=") && d.routes[0].path.endsWith("&viewMode=story") && d.viewports.desktop.width === 1024' "iframe URLs and the smaller story viewport"
+check "--stories with wildcard" test "$(node "$S/stories.cjs" --base "$SBF/index-base.json" --head "$SBF/index-head.json" --stories 'button--*,card--default' --out "$TMP/sb" | node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).stories.map((s)=>s.id).join())')" = "button--primary,button--secondary,card--default"
+check "Storybook 6 stories.json is read too" node -e 'const {parseIndex}=require(process.argv[1]);const s=parseIndex({v:3,stories:{"a--b":{id:"a--b",kind:"A",name:"B",importPath:"./src/A.stories.js"}}});if(s.length!==1||s[0].title!=="A"||s[0].importPath!=="src/A.stories.js")process.exit(1)' "$S/stories.cjs"
+mkdir -p "$TMP/dc/sb-script" "$TMP/dc/sb-dir/.storybook"
+echo '{"scripts":{"storybook":"storybook dev -p 6006"}}' > "$TMP/dc/sb-script/package.json"
+echo '{"devDependencies":{"storybook":"10"}}' > "$TMP/dc/sb-dir/package.json"
+touch "$TMP/dc/sb-dir/pnpm-lock.yaml"
+check "storybook script + npm" test "$(node "$S/devcmd.cjs" "$TMP/dc/sb-script" --storybook)" = "npm run storybook -- -p {port} --ci"
+check "storybook CLI + pnpm"  test "$(node "$S/devcmd.cjs" "$TMP/dc/sb-dir" --storybook)" = "pnpm exec storybook dev -p {port} --ci"
 
 # ---------------------------------------------------------------------------------
 section "e2e: static site — style changes, new page, unchanged page"
@@ -176,6 +203,39 @@ if [ "$FULL" = 1 ]; then
     check "temporary worktree removed" no_extra_worktrees "$TMP/vite-app"
   else
     echo "  ✗ couldn't scaffold the Vite app (network?)"; FAIL=$((FAIL + 1))
+  fi
+
+  section "e2e (full): Storybook mode on a real Storybook (React + Vite)"
+  cd "$TMP"
+  if npm create -y vite@6.5.0 sb-app -- --template react >/dev/null 2>&1 && cd sb-app &&
+     npm install --silent --no-audit --no-fund >/dev/null 2>&1 &&
+     npm install --silent --no-audit --no-fund -D storybook@10.6.7 @storybook/react-vite@10.6.7 >/dev/null 2>&1; then
+    npm pkg set scripts.storybook="storybook dev -p 6006"
+    mkdir -p .storybook
+    echo "export default { stories: ['../src/**/*.stories.jsx'], framework: '@storybook/react-vite' };" > .storybook/main.js
+    echo ".btn { padding: 8px 14px; border: 0; border-radius: 4px; background: #2563eb; color: white; }" > src/Button.css
+    printf '%s\n' "import './Button.css';" "export const Button = ({ label }) => <button className=\"btn\">{label}</button>;" > src/Button.jsx
+    printf '%s\n' "import { Button } from './Button';" "export default { title: 'Button', component: Button };" \
+      "export const Primary = { args: { label: 'Save' } };" > src/Button.stories.jsx
+    printf '%s\n' "export default { title: 'Note' };" "export const Plain = { render: () => <p>Unrelated</p> };" > src/Note.stories.jsx
+    git init -q -b main && git add -A && commit base
+    git checkout -q -b green
+    echo ".btn { padding: 8px 14px; border: 0; border-radius: 999px; background: #16a34a; color: white; }" > src/Button.css
+    echo "export const Long = { args: { label: 'Save and continue' } };" >> src/Button.stories.jsx
+    git add -A && commit "green pill button"
+    bash "$S/run.sh" --storybook > "$TMP/sb.out" 2> "$TMP/sb.err"
+    check "run.sh --storybook exits 0" test $? = 0
+    expect "$TMP/sb.err" 'has(d, "npm run storybook -- -p {port} --ci")' "detects the Storybook command"
+    B="$TMP/sb-app/.ui-diff/report"
+    expect "$B/results.json" 'item(d, "button--primary__desktop.png").status === "changed" && item(d, "button--primary__mobile.png").status === "changed"' "changed component's story is changed"
+    expect "$B/results.json" 'item(d, "button--long__desktop.png").status === "added"' "story only on head is new"
+    expect "$B/results.json" '!d.items.some((i) => i.name === "note--plain") && d.summary.error === 0 && d.items.every((i) => !i.warnings)' "unrelated story not captured; no errors"
+    expect "$B/measured.md" 'has(d, "`background-color`: #2563eb → #16a34a") && has(d, "`border-radius`: 4px → 999px")' "measures the restyle"
+    expect "$B/run.json" 'd.storybook === true && d.routes.includes("button--primary")' "run.json lists stories"
+    for p in $(node -e 'const r=require(process.argv[1]);console.log(r.ports.base, r.ports.head)' "$B/run.json"); do check "Storybook on :$p was stopped" port_closed "$p"; done
+    check "temporary worktree removed" no_extra_worktrees "$TMP/sb-app"
+  else
+    echo "  ✗ couldn't set up the Storybook app (network?)"; FAIL=$((FAIL + 1))
   fi
 fi
 

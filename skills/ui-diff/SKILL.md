@@ -46,6 +46,11 @@ git diff --name-only <base>...HEAD
 Map changed files to routes using `references/route-mapping.md`. If nothing UI-related
 changed, say so and stop. Don't produce an empty report.
 
+**Storybook projects** (a `.storybook/` folder or a `storybook` script): when the change is
+mostly to components, diff their stories instead of pages with `run.sh --storybook`; it
+picks the stories from the changed files itself. Stay with pages for routes, layouts and
+app-level styles. See the Storybook section of `references/route-mapping.md`.
+
 Tell the user in a line or two which routes you'll capture and why, then continue. Only ask
 when you can't find any route, or when a dynamic route needs an id you can't find. Keep
 track of routes that are **affected but not captured** (too many to check, needs a login,
@@ -67,6 +72,10 @@ In one go, it:
 - captures every route × viewport. Mobile uses real device emulation (touch, mobile UA).
   Animations are frozen and framework dev overlays are hidden;
 - pixel-diffs the screenshots (`results.json`, full-page and zoomed images) and runs a computed-style diff (`measured.md`).
+
+**Storybook mode** (`--storybook`, or `--stories "button--primary,card--*"` to choose them
+yourself) starts Storybook instead of the dev server, logs which stories it picked and why,
+and names results by story id. If no story matches, it exits and suggests ids.
 
 It prints counts like `{"changed":2,"added":1,"unchanged":3,...}`. Defaults: base = the PR's
 base branch (else the default branch), viewports = desktop 1440×900 + iPhone 13, light mode.
