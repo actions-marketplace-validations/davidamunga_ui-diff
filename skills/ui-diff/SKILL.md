@@ -1,6 +1,7 @@
 ---
 name: ui-diff
 description: Show the visual / UI / UX impact of a pull request. Renders the affected pages of a web app at the base and head commits, pixel-diffs the screenshots, measures exact style changes (colors, spacing, type, contrast), writes a plain-language summary for designers and reviewers, and posts before/after images to the PR as a comment or in the description. Use this whenever someone wants reviewers to *see* a frontend change — "add screenshots to my PR", "what does this PR look like", "visual diff", "before/after", "design review", "did my CSS change break anything", "show the UI changes", "visual regression check" — even if they don't say "UI diff" or "design diff". Works with any web app that runs on a local dev server (React, Next.js, Vue, Nuxt, Svelte, Angular, Astro, plain HTML).
+license: MIT (see LICENSE.txt)
 compatibility: Needs bash, git and Node.js 18+; the GitHub CLI (gh, logged in) to post to PRs; python3 for plain-HTML sites. The first run downloads Playwright + Chromium (~150 MB) into ~/.cache/ui-diff. macOS or Linux.
 metadata:
   author: davidamunga

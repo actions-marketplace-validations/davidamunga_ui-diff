@@ -57,7 +57,7 @@ npx skills add davidamunga/ui-diff -g -a codex -a cursor -a gemini-cli -a github
 | Windsurf | `~/.codeium/windsurf/skills/` | `.windsurf/skills/` |
 | Amp | `~/.config/agents/skills/` | `.agents/skills/` |
 
-The repo is private, so teammates need read access to clone or install it.
+The repo is public: anyone can clone it or install it with any of the methods above.
 
 Requirements: bash, git, Node 18+, and `gh` (logged in) for posting to PRs. On the first run
 Playwright and Chromium are installed into `~/.cache/ui-diff`. Your project's dependencies
@@ -104,9 +104,11 @@ touches GitHub. Run it after any change to `skills/ui-diff/scripts/`.
 ## Layout
 
 ```
+LICENSE                         MIT
 install.sh                      install for every detected agent
 skills/ui-diff/
 ├── SKILL.md                    the workflow the agent follows
+├── LICENSE.txt                 MIT (copy that travels with the skill folder)
 ├── scripts/
 │   ├── run.sh                  the whole pipeline: worktrees → servers → capture → diffs
 │   ├── setup.sh                one-time toolchain install
@@ -127,3 +129,7 @@ tests/
 ├── expect.cjs                  assertion helper
 └── fixtures/static-site/       base/ + head/ overlay for the demo site
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
