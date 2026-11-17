@@ -8,10 +8,12 @@
 //     [--viewports "desktop:1440x900,mobile:iPhone 13"] [--schemes light,dark]
 //
 // --routes are added to the config's routes. --viewports/--schemes override the config.
-// Writes <out>/<name>__<viewport>[__<scheme>].png, a matching .styles.json, and manifest.json.
+// Writes <out>/<name>__<viewport>[__<scheme>].png, a matching .styles.json and .issues.json
+// (possible bugs: clipped text, sideways scroll, overlap, off-screen controls, small tap
+// targets on mobile, axe-core WCAG A/AA violations), and manifest.json.
 const fs = require('fs');
 const path = require('path');
-const { need, args, slug } = require('./lib.cjs');
+const { need, args, slug, TOOLS_DIR } = require('./lib.cjs');
 const { chromium, devices } = need('playwright');
 
 const DEFAULT_VIEWPORTS = { desktop: { width: 1440, height: 900 }, mobile: { device: 'iPhone 13' } };
@@ -164,6 +166,258 @@ function snapshotStyles() {
   return { truncated: out.length >= MAX, elements: out };
 }
 
+// Runs in the page. Heuristic layout checks; stylediff.cjs keeps only the ones that are new on
+// head. Each issue names its element(s) the way snapshotStyles does (path + text/ident), so the
+// same problem on base and head gets the same key. Boxes are page-space CSS px.
+//   opts: { mobile, ignore: [selectors], off: { textClipping, pageOverflow, overlap, offscreen, tapTargets } }
+function detectIssues(opts) {
+  const MAX = 3000; // elements examined
+  const vw = document.documentElement.clientWidth;
+  const ignored = (el) => opts.ignore.some((s) => { try { return el.closest(s); } catch { return false; } });
+  const who = (el) => {
+    const tags = [];
+    for (let n = el; n && n !== document.body; n = n.parentElement) tags.unshift(n.tagName.toLowerCase());
+    const text = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const ident = el.id || el.getAttribute('data-testid') || el.getAttribute('aria-label') || el.getAttribute('name') ||
+      (el.tagName === 'IMG' ? el.getAttribute('alt') || (el.getAttribute('src') || '').replace(/^data:.*/, '').split('/').pop().slice(0, 60) : '') || '';
+    return { path: tags.join('>'), tag: el.tagName.toLowerCase(), cls: [...el.classList].slice(0, 2).map((c) => c.slice(0, 24)), text: text || (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 80), ident };
+  };
+  const box = (r) => [Math.round(r.left + scrollX), Math.round(r.top + scrollY), Math.round(r.width), Math.round(r.height)];
+  const visible = (el) => el.checkVisibility ? el.checkVisibility({ opacityProperty: true, visibilityProperty: true }) : true;
+  // Screen-reader-only / visually hidden patterns: tiny, clipped away, or aria-hidden.
+  const srOnly = (el, r, cs) => r.width <= 2 || r.height <= 2 || (cs.clip && cs.clip !== 'auto') ||
+    /inset\(50%|inset\(100%/.test(cs.clipPath) || el.closest('[aria-hidden="true"], [inert]');
+  const positioned = (el, kinds) => { for (let n = el; n && n !== document.body; n = n.parentElement) if (kinds.includes(getComputedStyle(n).position)) return true; return false; };
+  const INTERACTIVE = 'a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=link], [role=checkbox], [role=radio], [role=switch], [role=tab], [role=menuitem]';
+  const textRects = (el) => {
+    const rects = [];
+    for (const n of el.childNodes) {
+      if (n.nodeType !== 3 || !n.textContent.trim()) continue;
+      const rg = document.createRange();
+      rg.selectNodeContents(n);
+      for (const r of rg.getClientRects()) if (r.width > 0 && r.height > 0) rects.push(r);
+    }
+    return rects;
+  };
+  // The parts of rects not cut away by clipping ancestors (for overlap: hidden lines don't count).
+  const clipRects = (el, rects) => {
+    let c = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
+    for (let a = el; a && a !== document.body; a = a.parentElement) {
+      const acs = getComputedStyle(a);
+      if (acs.overflowX === 'visible' && acs.overflowY === 'visible') continue;
+      const ar = a.getBoundingClientRect();
+      c = { left: Math.max(c.left, ar.left), top: Math.max(c.top, ar.top), right: Math.min(c.right, ar.right), bottom: Math.min(c.bottom, ar.bottom) };
+    }
+    return rects.map((r) => {
+      const left = Math.max(r.left, c.left), top = Math.max(r.top, c.top), right = Math.min(r.right, c.right), bottom = Math.min(r.bottom, c.bottom);
+      return { left, top, right, bottom, width: right - left, height: bottom - top };
+    }).filter((r) => r.width > 0 && r.height > 0);
+  };
+  const union = (rs) => rs.reduce((u, r) => ({ left: Math.min(u.left, r.left), top: Math.min(u.top, r.top), right: Math.max(u.right, r.right), bottom: Math.max(u.bottom, r.bottom) }),
+    { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+  const issues = [];
+
+  // Candidate elements: visible, not ignored, not visually hidden.
+  const textEls = [];
+  const targets = [];
+  let n = 0;
+  for (const el of document.body.querySelectorAll('*')) {
+    if (++n > MAX) break;
+    if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|svg|path)$/.test(el.tagName)) continue;
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    const isTarget = el.matches(INTERACTIVE) && !el.disabled;
+    const rects = textRects(el);
+    if (!rects.length && !isTarget) continue;
+    if (!visible(el) || ignored(el)) continue;
+    if (isTarget && (r.width < 1 || r.height < 1)) {
+      // Interactive, in normal flow, with a label, yet no size: squashed (flex shrink, width: 0).
+      if (!opts.off.offscreen && cs.display !== 'contents' && /static|relative/.test(cs.position) && (el.innerText || '').trim() && !srOnly(el, { width: 9, height: 9 }, cs)) {
+        issues.push({ type: 'offscreen', el: who(el), box: box(r), detail: { zero: true } });
+      }
+      continue;
+    }
+    if (srOnly(el, r, cs)) continue;
+    if (rects.length) textEls.push({ el, r, cs, rects, tb: union(rects), vis: clipRects(el, rects) });
+    if (isTarget) targets.push({ el, r, cs });
+  }
+
+  // Text cut off by its own box or a clipping ancestor (overflow hidden/clip, ellipsis, line clamp).
+  // Only partial clipping counts: text that's entirely outside its clip box (carousel slides,
+  // collapsed panels) is hidden on purpose.
+  if (!opts.off.textClipping) {
+    for (const t of textEls) {
+      const tb = t.tb;
+      let hops = 0;
+      for (let a = t.el; a && a !== document.body && a !== document.documentElement && hops < 8; a = a.parentElement, hops++) {
+        const acs = a === t.el ? t.cs : getComputedStyle(a);
+        const ox = /hidden|clip/.test(acs.overflowX), oy = /hidden|clip/.test(acs.overflowY);
+        if (/auto|scroll/.test(acs.overflowX + acs.overflowY)) break; // scrollable: reachable, not clipped
+        if (!ox && !oy) continue;
+        const ar = a.getBoundingClientRect();
+        const c = { left: ar.left + a.clientLeft, top: ar.top + a.clientTop };
+        c.right = c.left + a.clientWidth; c.bottom = c.top + a.clientHeight;
+        // Clipped by an ancestor: only when the text spills out of its own element and that
+        // element still fits the clip box. A whole element cropped by a container (mock-ups
+        // in a hero, slides) is layout, not overflowing text.
+        const own = t.r;
+        const fitsX = a === t.el || (own.left >= c.left - 2 && own.right <= c.right + 2);
+        const fitsY = a === t.el || (own.top >= c.top - 2 && own.bottom <= c.bottom + 2);
+        const cutX = ox && fitsX ? Math.max(0, c.left - tb.left) + Math.max(0, tb.right - c.right) : 0;
+        const cutY = oy && fitsY ? Math.max(0, c.top - tb.top) + Math.max(0, tb.bottom - c.bottom) : 0;
+        const inside = Math.min(tb.right, c.right) > Math.max(tb.left, c.left) && Math.min(tb.bottom, c.bottom) > Math.max(tb.top, c.top);
+        // Glyph boxes overhang tight line-heights a little; a clamped line is a whole line.
+        if (inside && (cutX >= 4 || cutY >= Math.max(4, parseFloat(t.cs.fontSize) * 0.4))) {
+          const ellipsis = t.cs.textOverflow === 'ellipsis' && cutX >= 4;
+          const clamp = acs.webkitLineClamp && acs.webkitLineClamp !== 'none';
+          issues.push({ type: 'textClipping', el: who(t.el), box: box(a.getBoundingClientRect()),
+            detail: { how: ellipsis ? 'ellipsis' : clamp ? 'line-clamp' : 'overflow', text: [Math.round(tb.right - tb.left), Math.round(tb.bottom - tb.top)], clip: [Math.round(c.right - c.left), Math.round(c.bottom - c.top)], by: a === t.el ? null : who(a).tag } });
+        }
+        break; // the nearest clipping box decides
+      }
+    }
+  }
+
+  // Sideways scroll: the page is wider than the viewport. Name the outermost offenders.
+  const docW = document.documentElement.scrollWidth;
+  if (!opts.off.pageOverflow && docW > vw + 1) {
+    const over = [];
+    for (const el of document.body.querySelectorAll('*')) {
+      const r = el.getBoundingClientRect();
+      if (r.right + scrollX <= vw + 1 || r.width < 1 || ignored(el)) continue;
+      const cs = getComputedStyle(el);
+      if (cs.position === 'fixed') continue;
+      // Inside a box that clips or scrolls and itself fits (carousels, scrollable tables): fine.
+      let held = false;
+      for (let q = el.parentElement; q && q !== document.body && !held; q = q.parentElement) {
+        held = getComputedStyle(q).overflowX !== 'visible' && q.getBoundingClientRect().right + scrollX <= vw + 1;
+      }
+      if (held) continue;
+      const p = el.parentElement;
+      // Root cause: its parent still fits (or is the body).
+      if (p && p !== document.body && p.getBoundingClientRect().right + scrollX > vw + 1) continue;
+      over.push({ el, r });
+    }
+    over.sort((x, y) => y.r.right - x.r.right);
+    if (over.length) {
+      issues.push({ type: 'pageOverflow', el: who(over[0].el), box: box(over[0].r),
+        detail: { page: docW, viewport: vw, widest: over.slice(0, 3).map((o) => ({ ...who(o.el), right: Math.round(o.r.right + scrollX) })) } });
+    }
+  }
+
+  // Interactive elements in normal flow that ended up outside the page horizontally (unreachable).
+  // Skip links and sr-only controls park themselves off-screen with absolute/fixed positioning.
+  if (!opts.off.offscreen) {
+    const right = Math.max(docW, vw);
+    for (const t of targets) {
+      if (!/static|relative/.test(t.cs.position) || positioned(t.el.parentElement, ['absolute', 'fixed'])) continue;
+      if (t.r.right + scrollX <= 0 || t.r.left + scrollX >= right) {
+        issues.push({ type: 'offscreen', el: who(t.el), box: box(t.r), detail: { x: Math.round(t.r.left + scrollX) } });
+        continue;
+      }
+      // Pushed fully out of its own parent's clipped box (e.g. a flex row with overflow hidden).
+      // Only the direct parent: carousels clip slides a few levels up.
+      const p = t.el.parentElement, pcs = p && getComputedStyle(p);
+      if (p && p !== document.body && /hidden|clip/.test(pcs.overflowX + pcs.overflowY)) {
+        const pr = p.getBoundingClientRect();
+        if (t.r.left >= pr.right || t.r.right <= pr.left || t.r.top >= pr.bottom || t.r.bottom <= pr.top) {
+          issues.push({ type: 'offscreen', el: who(t.el), box: box(pr), detail: { clipped: who(p).tag } });
+        }
+      }
+    }
+  }
+
+  // Overlap between text and/or controls that don't contain each other. Fixed/sticky layers,
+  // pointer-events:none, and labels/adornments on form controls are intentional overlays.
+  if (!opts.off.overlap) {
+    const control = (el) => /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+    const items = [];
+    for (const t of textEls) if (t.vis.length) items.push({ el: t.el, rects: t.vis, cs: t.cs });
+    // Controls by their box (clipped like text). Absolutely positioned ones are skipped: the
+    // "stretched link" pattern lays an empty link over a whole card on purpose.
+    for (const t of targets) {
+      if (items.some((i) => i.el === t.el) || t.cs.position === 'absolute') continue;
+      const vis = clipRects(t.el, [t.r]);
+      if (vis.length) items.push({ el: t.el, rects: vis, cs: t.cs });
+    }
+    const ok = items.filter((i) => i.cs.pointerEvents !== 'none' && !positioned(i.el, ['fixed', 'sticky']));
+    const area = (r) => r.width * r.height;
+    const seen = new Set();
+    for (const i of ok) i.u = union(i.rects);
+    ok.sort((x, y) => x.u.top - y.u.top);
+    for (let i = 0; i < ok.length; i++) {
+      for (let j = i + 1; j < ok.length && ok[j].u.top < ok[i].u.bottom; j++) {
+        const A = ok[i], B = ok[j];
+        if (A.u.right <= B.u.left || B.u.right <= A.u.left) continue;
+        if (A.el.contains(B.el) || B.el.contains(A.el)) continue;
+        if ((control(A.el) || control(B.el)) && (A.el.closest('label') || B.el.closest('label') || A.cs.position === 'absolute' || B.cs.position === 'absolute')) continue;
+        let best = null;
+        for (const ra of A.rects) for (const rb of B.rects) {
+          const w = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
+          const h = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
+          if (w < 4 || h < 4) continue;
+          if (w * h < 0.25 * Math.min(area(ra), area(rb))) continue;
+          if (!best || w * h > best.w * best.h) best = { x: Math.max(ra.left, rb.left), y: Math.max(ra.top, rb.top), w, h };
+        }
+        if (!best) continue;
+        if (seen.has(A.el) && seen.has(B.el)) continue;
+        seen.add(A.el); seen.add(B.el);
+        issues.push({ type: 'overlap', el: who(A.el), other: who(B.el), box: box({ left: best.x, top: best.y, width: best.w, height: best.h }), detail: { w: Math.round(best.w), h: Math.round(best.h) } });
+        if (issues.length > 200) break;
+      }
+    }
+  }
+
+  // WCAG 2.5.8 target size (mobile viewports only): under 24×24 CSS px, unless it's an inline
+  // link in a sentence, a native unstyled checkbox/radio, or spaced so a 24px circle around it
+  // touches no other target.
+  if (opts.mobile && !opts.off.tapTargets) {
+    const small = targets.filter((t) => (t.r.width < 24 || t.r.height < 24) && !(t.cs.display === 'inline' && t.el.parentElement &&
+      [...t.el.parentElement.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())) &&
+      !(/^(checkbox|radio)$/.test(t.el.type) && t.cs.appearance !== 'none'));
+    const center = (r) => [r.left + r.width / 2, r.top + r.height / 2];
+    const dist = ([x, y], r) => Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
+    for (const t of small) {
+      const c = center(t.r);
+      const crowded = targets.some((o) => o !== t && !o.el.contains(t.el) && !t.el.contains(o.el) &&
+        (dist(c, o.r) < 12 || (small.includes(o) && Math.hypot(c[0] - center(o.r)[0], c[1] - center(o.r)[1]) < 24)));
+      if (crowded) issues.push({ type: 'tapTargets', el: who(t.el), box: box(t.r), detail: { w: Math.round(t.r.width), h: Math.round(t.r.height) } });
+    }
+  }
+  return { dpr: devicePixelRatio, viewport: vw, issues };
+}
+
+// Runs in the page after axe-core was injected: WCAG 2 A/AA violations, one record per element.
+// color-contrast is off: stylediff.cjs has its own contrast check (with base → head ratios).
+async function runAxe(opts) {
+  const res = await axe.run({ exclude: opts.ignore.map((s) => [s]) }, {
+    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] },
+    rules: Object.fromEntries(['color-contrast', ...opts.ignoreRules].map((r) => [r, { enabled: false }])),
+    resultTypes: ['violations'], elementRef: true,
+  });
+  const out = [];
+  for (const v of res.violations) {
+    for (const node of v.nodes.slice(0, 20)) {
+      const el = node.element;
+      const tags = [];
+      for (let n = el; n && n !== document.body && n.parentElement; n = n.parentElement) tags.unshift(n.tagName.toLowerCase());
+      const ident = el ? el.id || el.getAttribute('data-testid') || el.getAttribute('aria-label') || el.getAttribute('name') ||
+        (el.tagName === 'IMG' ? (el.getAttribute('src') || '').replace(/^data:.*/, '').split('/').pop().slice(0, 60) : '') || '' : '';
+      // Own text only (a whole-page violation like html-has-lang mustn't change key with the copy);
+      // controls use their full label.
+      const own = el && (el.matches('a, button, label, [role=button], [role=link]') ? el.innerText || '' : [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' '));
+      const text = (own || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      const r = el && el.getBoundingClientRect();
+      out.push({
+        type: 'a11y', rule: v.id, impact: v.impact, help: v.help, helpUrl: v.helpUrl, target: node.target.join(' ').slice(0, 120),
+        el: { path: tags.join('>'), tag: el ? el.tagName.toLowerCase() : '', cls: el ? [...el.classList].slice(0, 2).map((c) => c.slice(0, 24)) : [], text, ident },
+        box: r && r.width ? [Math.round(r.left + scrollX), Math.round(r.top + scrollY), Math.round(r.width), Math.round(r.height)] : null,
+      });
+    }
+  }
+  return out;
+}
+
 // True if the framework's dev error overlay is showing (checked before we hide it).
 function devOverlayError() {
   if (document.querySelector('vite-error-overlay')) return true;
@@ -195,6 +449,14 @@ async function main() {
   const extraCSS = `${STABILIZE_CSS}\n${hide.join(',')} { display: none !important; }\n${cfg.css || ''}`;
   const settleMs = Number(a.settle ?? cfg.settleMs ?? 300);
   const storageState = cfg.storageState && fs.existsSync(cfg.storageState) ? cfg.storageState : undefined;
+  // "checks": false turns them all off; an object turns single checks off and ignores selectors.
+  const checks = cfg.checks === false ? null : { ...(cfg.checks || {}) };
+  let axeSource = null;
+  if (checks && checks.a11y !== false) {
+    try { axeSource = fs.readFileSync(require.resolve('axe-core/axe.min.js', { paths: [TOOLS_DIR] }), 'utf8'); } catch {
+      console.error('note: axe-core not installed; accessibility checks skipped (rerun scripts/setup.sh)');
+    }
+  }
 
   fs.mkdirSync(a.out, { recursive: true });
   const browser = await chromium.launch();
@@ -240,6 +502,23 @@ async function main() {
           });
           const styles = await page.evaluate(snapshotStyles);
           fs.writeFileSync(path.join(a.out, file.replace(/\.png$/, '.styles.json')), JSON.stringify(styles));
+          if (checks) {
+            const d = vp.device && devices[vp.device];
+            const opts = {
+              mobile: d ? !!(d.isMobile || d.hasTouch) : /mobile|phone/i.test(vpName) || vp.width <= 480,
+              ignore: [...(checks.ignore || []), ...mask, ...(route.mask || [])],
+              ignoreRules: checks.ignoreRules || [],
+              off: Object.fromEntries(Object.entries(checks).filter(([, v]) => v === false).map(([k]) => [k, true])),
+            };
+            const found = await page.evaluate(detectIssues, opts);
+            if (axeSource) {
+              try {
+                await page.addScriptTag({ content: axeSource });
+                found.issues.push(...(await page.evaluate(runAxe, opts)));
+              } catch (e) { found.axeError = String(e.message || e).split('\n')[0]; }
+            }
+            fs.writeFileSync(path.join(a.out, file.replace(/\.png$/, '.issues.json')), JSON.stringify(found));
+          }
         } catch (e) {
           entry.error = String(e.message || e).split('\n')[0];
           console.error(`! ${url} [${vpName}/${scheme}]: ${entry.error}`);

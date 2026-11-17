@@ -24,6 +24,7 @@ Saves what you'd otherwise rediscover every run. Everything is optional.
   "fullPage": true,
   "settleMs": 300,
   "storageState": ".ui-diff/auth.json",
+  "checks": { "tapTargets": false, "ignore": [".carousel", "#chat-widget"], "ignoreRules": ["link-name"] },
   "post": "comment",
   "requireApproval": false
 }
@@ -44,6 +45,7 @@ Saves what you'd otherwise rediscover every run. Everything is optional.
 | `hide` | Selectors removed from screenshots (chat widgets, cookie banners). Framework dev overlays (Next.js indicator, Vite/webpack error overlays, Astro/Nuxt toolbars, TanStack devtools) are hidden automatically; if one was *showing an error*, that's reported as a warning instead. |
 | `colorSchemes` | `["light"]` by default. Add `"dark"` if the app supports it. |
 | `storageState` | Playwright auth state for pages behind login (see below). |
+| `checks` | Possible-bug checks run on every capture; only problems that are on head and not on base are reported. `false` turns them all off. Otherwise an object: set any of `textClipping` (text cut off by overflow, ellipsis or line clamp), `pageOverflow` (sideways scroll), `overlap` (text/controls overlapping), `offscreen` (controls pushed out of view or squashed to 0), `tapTargets` (under 24×24px, mobile viewports only), `a11y` (axe-core WCAG 2 A/AA rules) to `false`; `ignore`: selectors whose elements (and descendants) are skipped (`mask` selectors are skipped too); `ignoreRules`: axe rule ids to skip. Color contrast is always measured by the style diff instead of axe. |
 | `post` | Default destination: `"comment"`, `"description"` or `"manual"`. |
 | `requireApproval` | `true` if the repo gates UI changes on a design sign-off (the Action's `require-approval` with `ui-diff-approve.yml`). The agent then passes `--approval` to `comment.cjs`, which adds a "Design approved" box tied to the head commit. |
 | `animate` | `false` to skip the animated before ⇄ after image of each changed area (an APNG that flips between a grey "BEFORE" and a violet "AFTER" frame). On by default; the comment then shows the animations first and folds the still before/after pairs into a collapsed block. `comment.cjs --no-animate` drops them from one comment only. |

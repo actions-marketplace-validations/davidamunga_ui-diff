@@ -88,7 +88,11 @@ rerun. Don't skip one side.
 
 ## 4. Read the results and write the summary
 
-Read `.ui-diff/report/measured.md` first. These are **measured** facts: computed-style
+Read `.ui-diff/report/measured.md` first. If it opens with **Possible problems**, check those
+first: clipped text, sideways scroll, overlap, off-screen controls, small mobile tap targets
+and axe-core accessibility violations that are new on head. They're heuristics, so open each
+zoom image (`report/issues/`) and judge it. Lead "worth a look" with the real ones, and drop or
+soften any that look intentional. The rest of `measured.md` holds **measured** facts: computed-style
 changes grouped across elements, resized elements, layout shifts, copy changes, and
 **new** WCAG contrast failures. Then open the zoom images (`report/zoom/*__after.png` and `__before.png`)
 and diff overlays with whatever file or image viewing tool you have to see how those facts

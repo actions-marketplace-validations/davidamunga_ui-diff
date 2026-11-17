@@ -181,6 +181,36 @@ touch "$TMP/dc/sb-dir/pnpm-lock.yaml"
 check "storybook script + npm" test "$(node "$S/devcmd.cjs" "$TMP/dc/sb-script" --storybook)" = "npm run storybook -- -p {port} --ci"
 check "storybook CLI + pnpm"  test "$(node "$S/devcmd.cjs" "$TMP/dc/sb-dir" --storybook)" = "pnpm exec storybook dev -p {port} --ci"
 
+section "unit: possible-bug checks in the page (capture.cjs on tests/fixtures/checks)"
+CK_PORT="$(python3 -c 'import socket; s = socket.socket(); s.bind(("", 0)); print(s.getsockname()[1])')"
+python3 -m http.server "$CK_PORT" --directory "$FIX/checks" >/dev/null 2>&1 &
+CK_PID=$!
+for _ in $(seq 1 50); do curl -s -o /dev/null "http://localhost:$CK_PORT/" && break; sleep 0.1; done
+node "$S/capture.cjs" --url "http://localhost:$CK_PORT" --out "$TMP/ck" --routes / > /dev/null 2>&1
+check "capture.cjs exits 0" test $? = 0
+kill "$CK_PID" 2>/dev/null
+# fx(type, text) → the issues of that type whose element text/ident contains text
+# (expressions only: fx is bound by an arrow function wrapped around each check)
+FX='((fx) => '
+XF=')((t, s) => d.issues.filter((i) => i.type === t && (s === undefined || has(i.el.text + "|" + i.el.ident, s))))'
+for vp in desktop mobile; do
+  expect "$TMP/ck/home__$vp.issues.json" "$FX"' fx("textClipping", "Subscription details").length === 1 && fx("textClipping", "First line").length === 1'"$XF" "$vp: ellipsis and line-clamp truncation"
+  expect "$TMP/ck/home__$vp.issues.json" "$FX"' fx("overlap").length === 1 && has(fx("overlap")[0].el.text + fx("overlap")[0].other.text, "Billed yearly")'"$XF" "$vp: overlapping paragraphs (and only those: hidden clamped lines don't count)"
+  expect "$TMP/ck/home__$vp.issues.json" "$FX"' fx("offscreen").length === 1 && fx("offscreen", "Buy now").length === 1'"$XF" "$vp: control pushed out of its clipped row"
+  expect "$TMP/ck/home__$vp.issues.json" "$FX"' fx("a11y").some((i) => i.rule === "button-name") && fx("a11y").some((i) => i.rule === "image-alt") && !fx("a11y").some((i) => i.rule === "color-contrast")'"$XF" "$vp: axe violations (button-name, image-alt; contrast left to the style diff)"
+  expect "$TMP/ck/home__$vp.issues.json" "$FX"' !d.issues.some((i) => /Slide|Short line|Big title|screen readers|Skip to|Sticky|Email|Wide content/.test(i.el.text + (i.other ? i.other.text : "")) && i.type !== "a11y")'"$XF" "$vp: no false positives (carousel, scroll box, tight heading, sr-only, skip link, sticky bar, floating label)"
+done
+expect "$TMP/ck/home__mobile.issues.json" "$FX"' fx("pageOverflow").length === 1 && fx("pageOverflow")[0].detail.widest[0].cls[0] === "wide"'"$XF" "mobile: sideways scroll names the wide strip (not the scroll box)"
+expect "$TMP/ck/home__mobile.issues.json" "$FX"' fx("tapTargets").length === 2 && !fx("tapTargets", "One").length && !fx("tapTargets", "inline link").length && !d.issues.some((i) => i.el.tag === "input" && i.type === "tapTargets")'"$XF" "mobile: crowded 14px targets flagged; padded nav, inline link, native checkbox exempt"
+expect "$TMP/ck/home__desktop.issues.json" "$FX"' !fx("tapTargets").length && !fx("pageOverflow").length'"$XF" "desktop: no tap-target check, no sideways scroll"
+printf '{"checks":{"a11y":false,"textClipping":false,"ignore":[".pushed"]}}' > "$TMP/ck.json"
+python3 -m http.server "$CK_PORT" --directory "$FIX/checks" >/dev/null 2>&1 &
+CK_PID=$!
+for _ in $(seq 1 50); do curl -s -o /dev/null "http://localhost:$CK_PORT/" && break; sleep 0.1; done
+node "$S/capture.cjs" --url "http://localhost:$CK_PORT" --out "$TMP/ck2" --routes / --viewports "desktop:1280x800" --config "$TMP/ck.json" > /dev/null 2>&1
+kill "$CK_PID" 2>/dev/null
+expect "$TMP/ck2/home__desktop.issues.json" "$FX"' !fx("a11y").length && !fx("textClipping").length && !fx("offscreen").length && fx("overlap").length === 1'"$XF" "config: checks turned off and selectors ignored"
+
 # ---------------------------------------------------------------------------------
 section "e2e: static site — style changes, new page, unchanged page"
 REPO="$TMP/static"
@@ -208,6 +238,15 @@ expect "$R/measured.md" 'has(d, "copy: \"$12/mo\" → \"$10/mo, billed yearly\""
 expect "$R/measured.md" 'has(d, "contrast 2.54:1") && has(d, "(was 5.17:1)")' "flags new contrast failure with previous ratio"
 expect "$R/measured.md" 'has(d, "contrast 1.92:1") && has(d, "Faint helper text")' "flags contrast on a brand-new page"
 expect "$R/measured.md" '!has(d, "padding-top")' "no per-side padding noise"
+expect "$R/results.json" '((p) => ["pageOverflow", "textClipping", "tapTargets", "a11y"].every((t) => p.includes(t)))(item(d, "pricing-html__mobile.png").issues.new.map((x) => x.type))' "head's new problems found on mobile: sideways scroll, clipped label, small tap targets, axe"
+expect "$R/results.json" '((p) => p.some((x) => x.rule === "button-name") && p.some((x) => x.type === "textClipping") && !p.some((x) => x.type === "tapTargets" || x.type === "pageOverflow"))(item(d, "pricing-html__desktop.png").issues.new)' "desktop: clipped label + unnamed button; no tap targets or sideways scroll"
+expect "$R/results.json" '((i) => i.existing >= 1 && !i.new.some((x) => x.rule === "html-has-lang"))(item(d, "pricing-html__mobile.png").issues)' "pre-existing missing lang isn't new, though the page's copy changed"
+expect "$R/results.json" '["home__desktop.png", "home__mobile.png"].every((f) => item(d, f).issues.new.length === 0 && item(d, f).issues.existing >= 2)' "base's own problems (img without alt) are not reported as new"
+expect "$R/results.json" 'item(d, "about-html__desktop.png").issues.new.length === 0' "unchanged page: nothing new"
+expect "$R/results.json" 'item(d, "new-html__desktop.png").issues.existing === 0 && item(d, "new-html__desktop.png").issues.new.some((x) => x.rule === "html-has-lang")' "page only on head: all its problems are new"
+expect "$R/results.json" 'item(d, "pricing-html__mobile.png").issues.new.filter((x) => x.type !== "a11y").every((x) => x.zoom)' "every new layout problem has a zoom crop"
+check "zoom crop written" test -f "$R/$(node -e 'console.log(require(process.argv[1]).items.find((i) => i.file === "pricing-html__mobile.png").issues.new[0].zoom)' "$R/results.json")"
+expect "$R/measured.md" 'd.indexOf("Possible problems") < d.indexOf("`padding`") && has(d, "page scrolls sideways") && has(d, "text cut off: small \"Most popular\"")' "measured.md leads with possible problems"
 expect "$R/run.json" 'd.head.dirty === false && d.viewports.join() === "desktop,mobile"' "run.json: clean head, desktop + mobile"
 PORTS="$(node -e 'const r=require(process.argv[1]);console.log(r.ports.base, r.ports.head)' "$R/run.json")"
 for p in $PORTS; do check "server on :$p was stopped" port_closed "$p"; done
@@ -234,6 +273,7 @@ if (!changed.length || changed.some((i) => !html.includes(`data-file="${i.file}"
 ' "$R"
 check "includes every changed item (with its diff image)" test $? = 0
 expect "$R/index.html" 'has(d, "after/new-html__desktop.png") && has(d, "No visual change (2)") && has(d, "class=\"stage\"")' "new page, unchanged list and slider present"
+expect "$R/index.html" 'has(d, "class=\"problems\"") && has(d, "issues/pricing-html__mobile__p1.png") && has(d, "possible problems")' "possible problems shown with their zooms"
 printf '**What changed**\n- Buttons got `rounder`\n' > "$R/summary.md"
 node "$S/viewer.cjs" --report "$R" > /dev/null
 expect "$R/index.html" 'has(d, "<strong>What changed</strong>") && has(d, "<code>rounder</code>")' "summary.md rendered at the top"
@@ -250,6 +290,8 @@ expect "$TMP/comment.md" 'has(d, "pr-1/abc1234/'"$FLIP"'?raw=true") && d.indexOf
 node "$S/comment.cjs" --report "$R" --no-animate --out "$TMP/comment-still.md"
 expect "$TMP/comment-still.md" '!has(d, "__flip.png") && !has(d, "(still)") && has(d, "| Before | After |")' "--no-animate: still pairs only"
 expect "$R/index.html" 'has(d, "'"$FLIP"'") && has(d, "trio four")' "review page shows the animation too"
+expect "$TMP/comment.md" 'has(d, "possible problems</sub>") && has(d, "**⚠️ Possible problems**") && has(d, "pr-1/abc1234/issues/pricing-html__mobile__p1.png?raw=true")' "possible problems: count line, per-page list, zoom images"
+expect "$TMP/comment.md" 'd.split("### `/pricing.html` — mobile")[1].indexOf("Possible problems") < d.split("### `/pricing.html` — mobile")[1].indexOf("| Before | After |")' "problems sit at the top of the item"
 
 section "e2e: vs design section (base screenshot standing in for the Figma frame)"
 node "$S/compare.cjs" --design "$REPO/.ui-diff/shots/before/pricing-html__desktop.png" --actual "$REPO/.ui-diff/shots/after/pricing-html__desktop.png" \
@@ -292,6 +334,8 @@ expect "$TMP/auto.md" 'has(d, "Automatic summary") && has(d, "**What changed**")
 expect "$TMP/auto.md" 'has(d, "`/pricing.html` (desktop, mobile) — ") && has(d, "text change")' "one line per route across viewports, with measured facts"
 expect "$TMP/auto.md" 'has(d, "🆕 `/new.html` — new page (desktop, mobile)") && !has(d.split("<sub>**")[0], "HTTP 404")' "new page (its base 404 isn't flagged)"
 expect "$TMP/auto.md" 'has(d, "**Worth a look**") && has(d, "contrast 2.54:1") && has(d, "(was 5.17:1)")' "new contrast failures under worth a look"
+expect "$TMP/auto.md" '((w) => has(w[0], "page scrolls sideways") || has(w[0], "text cut off"))(d.split("**Worth a look**")[1].split("\n").filter((l) => l.startsWith("- ")))' "worth a look leads with layout problems"
+expect "$TMP/auto.md" 'has(d, "2 tap targets under 24×24px") && has(d, "— `/pricing.html` (mobile)") && !has(d, "image-alt")' "problems grouped across viewports; base's own problems left out"
 expect "$TMP/auto.md" 'd.split("<sub>**")[0].split("contrast 2.54:1").length === 2 && has(d, "— `/`, `/pricing.html` (desktop, mobile)")' "a shared-header issue is one line across pages"
 expect "$TMP/auto.md" 'has(d, "contrast 1.92:1 (needs 4.5:1), #bbbbbb on #ffffff: p \"Faint helper text\"")' "new-page contrast is listed too"
 expect "$TMP/auto.md" '!has(d, "/about.html` (")' "unchanged pages aren't listed as changed"

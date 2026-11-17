@@ -45,6 +45,16 @@ const img = (rel, alt, width) => `<img src="${url(rel)}" alt="${alt}"${width ? `
 const label = (i) => [i.viewport, i.scheme && i.scheme !== 'light' ? i.scheme : null].filter(Boolean).join(' · ');
 const warn = (i) => (i.warnings || []).map((w) => `> ⚠️ ${w}`);
 const STATIC = '<details><summary>Before | After (still)</summary>\n';
+// Possible bugs new on head (stylediff.cjs), each with a zoom of the head screenshot.
+const newProblems = (i) => (i.issues ? i.issues.new : []);
+const problemCount = items.reduce((n, i) => n + newProblems(i).length, 0);
+function problems(i) {
+  const list = newProblems(i);
+  if (!list.length) return [];
+  const more = i.issues.omitted ? [`- …and ${i.issues.omitted} more (see measured.md)`] : [];
+  return ['**⚠️ Possible problems** <sub>new in this PR · automated heuristics, worth a check</sub>', '',
+    ...list.map((p) => `- ${p.line}${p.zoom ? `<br>${img(p.zoom, p.type, Math.min(p.zoomWidth || 600, 600))}` : ''}`), ...more, ''];
+}
 
 // Facts only (measured values, statuses, warnings), grouped by route across viewports.
 function autoSummary() {
@@ -68,6 +78,15 @@ function autoSummary() {
     f.items.push(i);
   };
   const few = (set, n) => [...set].slice(0, n).join(', ') + (set.size > n ? ', …' : '');
+  // Possible problems lead "worth a look"; the same problem at several viewports is one line.
+  const probs = new Map();
+  for (const i of items) {
+    for (const p of newProblems(i)) {
+      if (!probs.has(p.line)) probs.set(p.line, { routes: new Set(), items: [], layout: p.type !== 'a11y' });
+      probs.get(p.line).routes.add(i.route || i.name);
+      probs.get(p.line).items.push(i);
+    }
+  }
   for (const [route, list] of routes) {
     const of = (st) => list.filter((i) => i.status === st);
     if (of('added').length) what.push(`- 🆕 \`${route}\` — new page (${vps(of('added'))})`);
@@ -118,11 +137,13 @@ function autoSummary() {
     }
   }
   const out = ['<sub>🤖 Automatic summary from measured changes; not written or reviewed by a person.</sub>', ''];
-  if (!what.length && !look.size) return [...out, 'No visual changes on the checked pages.'].join('\n');
+  if (!what.length && !look.size && !probs.size) return [...out, 'No visual changes on the checked pages.'].join('\n');
   if (what.length) out.push('**What changed**', ...cap(what), '');
-  if (look.size) {
-    const lines = [...look].map(([issue, f]) => `- ⚠️ ${issue}${f.els.size ? `: ${few(f.els, 3)}` : ''} — ${few(new Set([...f.routes].map((r) => `\`${r}\``)), 4)} (${vps(f.items)})`);
-    out.push('**Worth a look**', ...cap(lines));
+  if (look.size || probs.size) {
+    const where = (f) => `${few(new Set([...f.routes].map((r) => `\`${r}\``)), 4)} (${vps(f.items)})`;
+    const pl = [...probs].sort(([, x], [, y]) => y.layout - x.layout).map(([line, f]) => `- ⚠️ ${line} — ${where(f)}`);
+    const lines = [...look].map(([issue, f]) => `- ⚠️ ${issue}${f.els.size ? `: ${few(f.els, 3)}` : ''} — ${where(f)}`);
+    out.push('**Worth a look**', ...cap([...pl, ...lines]));
   }
   return out.join('\n');
 }
@@ -140,6 +161,7 @@ const stats = summary ? [
   summary.error && `⚠️ ${summary.error} failed`,
 ].filter(Boolean) : [];
 if (designs.length) stats.push(`${designs.length} compared with the design`);
+if (problemCount) stats.push(`⚠️ ${problemCount} possible problem${problemCount > 1 ? 's' : ''}`);
 out.push(`<sub>${stats.join(' · ')}</sub>`);
 if (run) {
   const head = `\`${run.head.sha.slice(0, 7)}\`${run.head.dirty ? ' + uncommitted changes' : ''}`;
@@ -155,7 +177,7 @@ if (a.approval) {
 
 for (const i of items.filter((x) => x.status === 'changed')) {
   const size = i.sizeChanged ? ` · height ${i.before.height}→${i.after.height}px` : '';
-  out.push(`### \`${i.route || i.name}\` — ${label(i)}`, `<sub>${i.percent}% of pixels changed${size}</sub>`, '', ...warn(i));
+  out.push(`### \`${i.route || i.name}\` — ${label(i)}`, `<sub>${i.percent}% of pixels changed${size}</sub>`, '', ...warn(i), ...problems(i));
   const zoomed = (i.regions || []).filter((r) => r.zoom);
   // Animated before ⇄ after first; the static pairs move into a collapsed block.
   const flips = a['no-animate'] ? [] : zoomed.filter((r) => r.zoom.flip);
@@ -177,7 +199,12 @@ for (const i of items.filter((x) => x.status === 'changed')) {
 }
 
 for (const i of items.filter((x) => x.status === 'added')) {
-  out.push(`### 🆕 \`${i.route || i.name}\` — ${label(i)}`, '', ...warn(i), img(`after/${i.file}`, 'new', 400), '');
+  out.push(`### 🆕 \`${i.route || i.name}\` — ${label(i)}`, '', ...warn(i), ...problems(i), img(`after/${i.file}`, 'new', 400), '');
+}
+
+// No pixel change, but a check found something new (e.g. a removed alt text or aria-label).
+for (const i of items.filter((x) => x.status === 'unchanged' && newProblems(x).length)) {
+  out.push(`### \`${i.route || i.name}\` — ${label(i)}`, '<sub>No visual change</sub>', '', ...problems(i));
 }
 
 for (const i of items.filter((x) => x.status === 'removed')) {

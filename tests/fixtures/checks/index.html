@@ -1,0 +1,44 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Checks</title>
+<!-- Layout-check fixture: things that must NOT be flagged first, then real problems (class names say which). -->
+<style>
+body{font:16px/1.4 system-ui,sans-serif;margin:0;padding:16px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.skip{position:absolute;left:-9999px}
+.bar{position:sticky;top:0;background:#fff;height:40px}
+.field{position:relative;margin:24px 0}.field label{position:absolute;left:8px;top:8px}.field input{width:200px;height:36px;font-size:16px}
+.carousel{width:200px;overflow:hidden;white-space:nowrap}.carousel div{display:inline-block;width:200px}
+.scroller{width:200px;overflow-x:auto}.scroller div{width:600px}
+.fits{width:220px;overflow:hidden;white-space:nowrap}
+.tall{font-size:48px;line-height:1;overflow:hidden}
+.nav a{padding:12px 4px;display:inline-block;min-height:24px}
+.deco{position:absolute;top:0;left:0;width:300px;height:300px;pointer-events:none}
+.cut{width:60px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.clamp{width:160px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.wide{width:700px;background:#eee}
+.lap{margin-top:-40px}
+.tiny{display:inline-block;width:14px;height:14px;font-size:10px}
+.pushed{display:flex;width:100%;overflow:hidden}.pushed span{flex:none;width:100%}.pushed button{flex:none}
+</style></head><body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="bar"><span>Sticky header</span></div>
+<span class="sr-only">Only for screen readers with a very long label text</span>
+<div class="deco" aria-hidden="true"></div>
+<main id="main">
+<div class="field"><label for="e">Email</label><input id="e" type="email"></div>
+<div class="carousel"><div>Slide one</div><div>Slide two, off to the side</div></div>
+<div class="scroller"><div>Wide content inside a scroll box, not page overflow</div></div>
+<p class="fits">Short line</p>
+<h1 class="tall">Big title</h1>
+<nav class="nav"><a href="/a">One</a><a href="/b">Two</a></nav>
+<p>An <a href="/inline">inline link</a> in a sentence is exempt.</p>
+<label><input type="checkbox"> native checkbox</label>
+<div class="cut" id="cut-label">Subscription details</div>
+<p class="clamp">First line of text that keeps going and going so it needs to wrap onto more lines</p>
+<p>Price $10</p><p class="lap">Billed yearly</p>
+<div><a class="tiny" href="/x" aria-label="Share">s</a><a class="tiny" href="/y" aria-label="Save">v</a></div>
+<div class="pushed"><span>Row text</span><button>Buy now</button></div>
+<button class="noname"><svg width="20" height="20"><circle cx="10" cy="10" r="8"/></svg></button>
+<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E" width="20" height="20">
+</main>
+<div class="wide">This strip is wider than a phone</div>
+</body></html>

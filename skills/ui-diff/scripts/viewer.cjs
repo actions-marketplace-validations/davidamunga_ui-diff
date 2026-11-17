@@ -70,6 +70,14 @@ function size(rel) {
 }
 const img = (rel, alt, cls = '') => `<img src="${src(rel)}" alt="${esc(alt)}"${size(rel)}${cls ? ` class="${cls}"` : ''} loading="lazy">`;
 const warnings = (i) => (i.warnings || []).map((w) => `<p class="warn">⚠️ ${esc(w)}</p>`).join('');
+// Possible bugs new on head (stylediff.cjs), with their zoom crops.
+const problems = (i) => {
+  const list = (i.issues && i.issues.new) || [];
+  if (!list.length) return '';
+  const more = i.issues.omitted ? `<li>…and ${i.issues.omitted} more (see measured.md)</li>` : '';
+  return `<div class="problems"><h3>⚠️ Possible problems <span class="muted">new in this PR · heuristics, worth a check</span></h3><ul>${list.map((p) =>
+    `<li>${inline(esc(p.line))}${p.zoom ? img(p.zoom, p.type, 'pzoom') : ''}</li>`).join('')}${more}</ul></div>`;
+};
 const measured = (i) => {
   const lines = (i.measured && i.measured.lines) || [];
   if (!lines.length) return '';
@@ -87,7 +95,7 @@ function changed(i) {
     : '';
   const more = i.regionsOmitted ? `<p class="muted">+${i.regionsOmitted} more changed area${i.regionsOmitted > 1 ? 's' : ''}; see the full page.</p>` : '';
   return `
-    <p class="muted">${i.percent}% of pixels changed${size}</p>${warnings(i)}
+    <p class="muted">${i.percent}% of pixels changed${size}</p>${warnings(i)}${problems(i)}
     <div class="controls" role="group" aria-label="View">
       <button type="button" data-mode="slider" aria-pressed="true">Slider</button>
       <button type="button" data-mode="side" aria-pressed="false">Side by side</button>
@@ -110,7 +118,7 @@ function changed(i) {
 }
 
 function single(i, side, word) {
-  return `<p class="muted">${word}</p>${warnings(i)}
+  return `<p class="muted">${word}</p>${warnings(i)}${problems(i)}
     <div class="view single${phone(i) ? ' phone' : ''}"><figure>${img(`${side}/${i.file}`, side)}</figure></div>${measured(i)}`;
 }
 
@@ -118,12 +126,15 @@ const kinds = [
   ['changed', '', changed],
   ['added', '🆕 ', (i) => single(i, 'after', 'New page: only exists on head.')],
   ['removed', '🗑️ ', (i) => single(i, 'before', 'Removed: only exists on base.')],
+  ['unchanged', '⚠️ ', (i) => `<p class="muted">No visual change.</p>${problems(i)}`],
 ];
 // Group a page's viewports and schemes together, light before dark.
 const order = (x, y) => [x.route || x.name, y.route || y.name, x.viewport, y.viewport, x.scheme === 'light' ? '' : x.scheme || '', y.scheme === 'light' ? '' : y.scheme || '']
   .reduce((r, v, k, l) => r || (k % 2 ? 0 : String(v).localeCompare(String(l[k + 1]))), 0);
 items.sort(order);
-const nav = kinds.flatMap(([k, mark, render]) => items.filter((i) => i.status === k).map((i) => ({ i, mark, render })));
+// Unchanged pages only get a tab when a check found a new problem there.
+const nav = kinds.flatMap(([k, mark, render]) => items.filter((i) => i.status === k && (k !== 'unchanged' || (i.issues && i.issues.new.length))).map((i) => ({ i, mark, render })));
+const problemCount = items.reduce((n, i) => n + ((i.issues && i.issues.new.length) || 0), 0);
 
 const stats = [
   summary.changed && `<strong>${summary.changed} changed</strong>`,
@@ -131,6 +142,7 @@ const stats = [
   summary.removed && `${summary.removed} removed`,
   `${summary.unchanged} with no visual change`,
   summary.error && `⚠️ ${summary.error} failed`,
+  problemCount && `<span class="warn">⚠️ ${problemCount} possible problem${problemCount > 1 ? 's' : ''}</span>`,
 ].filter(Boolean).join(' · ');
 const runLine = run
   ? `<p class="muted">Checked ${run.routes.map((r) => `<code>${esc(r)}</code>`).join(', ')} at ${esc(run.viewports.join(', '))}${run.schemes.length > 1 ? ` (${esc(run.schemes.join(', '))})` : ''}: <code>${esc(run.base.sha.slice(0, 7))}</code> → <code>${esc(run.head.sha.slice(0, 7))}</code>${run.head.dirty ? ' + uncommitted changes' : ''}. Pages not listed were not checked.</p>`
@@ -186,6 +198,8 @@ figcaption { font-size: 13px; color: var(--muted); margin-bottom: 4px; } figcapt
 .trio.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .trio .cap { display: block; font-size: 12px; color: var(--muted); text-transform: capitalize; }
 .trio img { width: 100%; border: 1px solid var(--line); border-radius: 4px; background: var(--card); }
+.problems { background: var(--warnbg); border-radius: 8px; padding: 2px 14px 8px; margin: 12px 0; } .problems h3 { margin: 10px 0 6px; } .problems ul { padding-left: 20px; margin: 0; }
+.problems li { margin: 6px 0; word-break: break-word; } .pzoom { margin-top: 6px; max-height: 320px; width: auto; border: 1px solid var(--line); border-radius: 4px; }
 .measured { padding-left: 20px; margin: 0; } .measured li { margin: 2px 0; word-break: break-word; }
 section.rest { border-top: 1px solid var(--line); margin-top: 32px; } section.rest ul { padding-left: 20px; }
 .empty { color: var(--muted); padding: 24px 0; }
