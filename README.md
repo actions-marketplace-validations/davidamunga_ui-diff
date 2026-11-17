@@ -11,7 +11,8 @@ Run it on a branch and your agent will:
 4. Pixel-diff them and crop zoomed before/after images of each changed region.
 5. **Measure** the change: compare every element's computed styles to get exact values ("padding 8×14 → 12×20px", "`#2563EB` → `#9CA3AF`"), spot layout shifts and copy changes, and flag new WCAG contrast failures.
 6. Write a short design summary from those measurements and the images, leading with what looks unintended.
-7. Post it to the PR as a comment, or as a section of the PR description. Re-runs update the same comment instead of adding new ones.
+7. Write a local review page (`.ui-diff/report/index.html`) with a before/after slider, side-by-side and diff overlay views.
+8. Post it to the PR as a comment, or as a section of the PR description. Re-runs update the same comment instead of adding new ones.
 
 ## Install
 
@@ -118,6 +119,7 @@ skills/ui-diff/
 │   ├── diff.cjs                pixel diff, changed regions, zoom crops
 │   ├── stylediff.cjs           measured style/layout/copy/contrast changes
 │   ├── publish.sh              push images to the assets branch
+│   ├── viewer.cjs              local before/after review page (index.html)
 │   ├── comment.cjs             render the PR markdown
 │   └── post.cjs                create or update the PR comment / description section
 └── references/

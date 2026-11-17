@@ -11,7 +11,7 @@
 #            posting to a PR, so the report shows exactly what's pushed)
 #   --keep   leave servers' worktrees in place afterwards (for debugging)
 #
-# Output: .ui-diff/report/ — results.json, run.json, measured.md and the images.
+# Output: .ui-diff/report/ — results.json, run.json, measured.md, index.html (review page) and the images.
 # Servers are started in their own process groups and only those groups are stopped;
 # nothing else running on the machine is touched.
 set -euo pipefail
@@ -233,5 +233,7 @@ require("fs").writeFileSync(out + "/run.json", JSON.stringify({
 }, null, 2));
 ' "$WORK/report" "$BASE_REF" "$BASE_SHA" "$HEAD_ARG" "$HEAD_SHA" "$HEAD_DIRTY" "$BASE_PORT" "$HEAD_PORT"
 
+node "$S/viewer.cjs" --report "$WORK/report" > /dev/null
 log "done — $WORK/report"
+log "review page: $WORK/report/index.html"
 echo "$SUMMARY"
