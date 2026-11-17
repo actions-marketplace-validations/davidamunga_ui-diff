@@ -179,13 +179,13 @@ jobs:
           fetch-depth: 0
       - run: npm ci          # your project's install step
       - uses: davidamunga/ui-diff@v0
-        with:
-          routes: /,/pricing
+        # with:
+        #   routes: /,/pricing   # optional: picked from the changed files otherwise
 ```
 
 How it differs from running it through an agent:
 
-- **You list the routes**, in `routes` or in `.ui-diff.json`. Nothing infers them from the diff, and the job fails with a message if neither lists any.
+- **Routes come from the diff by rule, not judgement.** With no `routes` input and none in `.ui-diff.json`, [`routes.cjs`](skills/ui-diff/scripts/routes.cjs) picks them from the changed files: changed pages, routes under changed layouts, pages importing changed components (through aliases and workspace packages), and home plus a few well-linked pages for global styles. The log says why each was picked. Dynamic routes need example values (`routeParams` in `.ui-diff.json`). A PR that changes no page-affecting files is skipped; one where no route can be found fails and says so. Set `auto-routes: false` to require routes.
 - **The summary is automatic**, built from the measured changes and labelled as such. To use your own, write a Markdown file in an earlier step and pass it as `summary`.
 - **You install dependencies** with your own step before the action. Head reuses them; base reuses them when the lockfile matches and installs in its own worktree otherwise.
 - **Fork and Dependabot PRs are skipped** with a log line, because GitHub gives them a read-only token. Don't work around this with `pull_request_target`: that runs the PR's code with a write token.
@@ -241,7 +241,8 @@ approve workflow needs `statuses: write`, `pull-requests: write` and `issues: wr
 
 | Input | Default | |
 |---|---|---|
-| `routes` | | Comma-separated, e.g. `/,/pricing`. Added to `.ui-diff.json`'s routes. |
+| `routes` | from the diff | Comma-separated, e.g. `/,/pricing`. Added to `.ui-diff.json`'s routes. |
+| `auto-routes` | `true` | Pick routes from the changed files when none are given. `false` requires them. |
 | `dev-command` | detected | Starts the app; `{port}` is replaced with the port. |
 | `viewports` | `desktop:1440x900,mobile:iPhone 13` | |
 | `color-schemes` | `light` | e.g. `light,dark` |
@@ -328,6 +329,8 @@ skills/ui-diff/
 │   ├── setup.sh                one-time toolchain install
 │   ├── devcmd.cjs              detect the dev-server command and port flag
 │   ├── linkdeps.cjs            reuse installed deps in a worktree without sharing build caches
+│   ├── routes.cjs              changed files → routes to capture (per framework)
+│   ├── imports.cjs             import graph shared by routes.cjs and stories.cjs
 │   ├── stories.cjs             Storybook mode: changed files → stories to capture
 │   ├── capture.cjs             deterministic screenshots + computed-style snapshots
 │   ├── diff.cjs                pixel diff, changed regions, zoom crops

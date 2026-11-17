@@ -12,22 +12,21 @@
 //
 // A story is picked when its file changed, when a changed file has the same base name
 // (Button.tsx, button.module.css → Button.stories.tsx), or when its file imports a changed
-// file (up to 5 levels). A changed file matching none of those falls back to stories in the
+// file (up to 5 levels; relative, alias and tsconfig `paths` imports, see imports.cjs). A changed file matching none of those falls back to stories in the
 // same folder. A change under .storybook/ picks every story (capped by --max).
 // Writes <out>/capture-base.json and capture-head.json (the config with routes = that side's
 // stories, so a story on one side only shows up as new / removed) and prints a JSON summary.
 const fs = require('fs');
 const path = require('path');
 const { args } = require('./lib.cjs');
+const { norm, importsOf, closure, createResolver } = require('./imports.cjs');
 
 const P = path.posix;
 const DEFAULT_VIEWPORTS = { desktop: { width: 1024, height: 768 }, mobile: { device: 'iPhone 13' } };
 // Rendered (v7+: #storybook-root, v6: #root), or Storybook is showing an error / "no preview".
 const WAIT_FOR = '#storybook-root > *:visible, #root > *:visible, .sb-errordisplay:visible, .sb-nopreview:visible'; // Playwright :visible
 const UI_EXT = /\.(jsx?|tsx?|mjs|cjs|vue|svelte|astro|css|scss|sass|less|styl|html|svg|png|jpe?g|gif|webp|avif|woff2?)$/i;
-const RESOLVE_EXT = ['', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.vue', '.svelte', '/index.tsx', '/index.ts', '/index.jsx', '/index.js'];
 
-const norm = (f) => P.normalize(String(f).trim().replace(/\\/g, '/')).replace(/^\.\//, '');
 // "src/Button/index.tsx" → "button", "PrimaryButton.stories.tsx" → "primarybutton", "primary-button.module.css" → "primarybutton"
 function stem(f) {
   let s = P.basename(f).split('.')[0];
@@ -52,36 +51,6 @@ async function loadIndex(src) {
   throw new Error(`no /index.json or /stories.json at ${src} (is it a Storybook?)`);
 }
 
-// Relative (and @/ ~/ → src/) imports of a source file, resolved to project paths.
-function importsOf(file, read) {
-  const src = read(file);
-  if (!src) return [];
-  const out = [];
-  const re = /(?:import|export)\s[^'"]*?from\s*['"]([^'"]+)['"]|import\s*\(?\s*['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]|@import\s+(?:url\()?['"]([^'"]+)['"]/g;
-  for (const m of src.matchAll(re)) {
-    const spec = m[1] || m[2] || m[3] || m[4];
-    let base;
-    if (spec.startsWith('.')) base = P.join(P.dirname(file), spec);
-    else if (/^[@~]\//.test(spec)) base = P.join('src', spec.slice(2));
-    else continue;
-    const hit = RESOLVE_EXT.map((e) => norm(base + e)).find((f) => read(f) !== null);
-    if (hit) out.push(hit);
-  }
-  return out;
-}
-
-// Files a story file depends on (itself included), following local imports `depth` levels.
-function closure(file, read, depth = 5) {
-  const seen = new Set([file]);
-  let frontier = [file];
-  for (let d = 0; d < depth && frontier.length; d++) {
-    const next = [];
-    for (const f of frontier) for (const i of importsOf(f, read)) if (!seen.has(i)) { seen.add(i); next.push(i); }
-    frontier = next;
-  }
-  return seen;
-}
-
 // changed: paths relative to the Storybook project; read(file) → source text or null.
 // Returns { picked: Map<id, reason>, unmatched: [files] }.
 function pickStories(stories, changed, read = () => null) {
@@ -89,7 +58,8 @@ function pickStories(stories, changed, read = () => null) {
   const add = (s, why) => picked.has(s.id) || picked.set(s.id, why);
   const files = [...new Set(stories.map((s) => s.importPath))];
   const deps = new Map();
-  const depsOf = (f) => deps.get(f) || deps.set(f, closure(f, read)).get(f);
+  const resolve = createResolver(read);
+  const depsOf = (f) => deps.get(f) || deps.set(f, closure(f, read, 5, resolve)).get(f);
   const unmatched = [];
   for (const c of changed.map(norm).filter(Boolean)) {
     if (c.startsWith('.storybook/')) {

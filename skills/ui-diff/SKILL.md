@@ -40,11 +40,17 @@ masks and auth (see `references/config.md`).
 ## 2. Choose the pages
 
 ```bash
-git diff --name-only <base>...HEAD
+node $SKILL/scripts/routes.cjs --base <base> --log   # add --head <sha> if you'll pass it to run.sh
 ```
 
-Map changed files to routes using `references/route-mapping.md`. If nothing UI-related
-changed, say so and stop. Don't produce an empty report.
+It maps the changed files to routes: page files, routes under a changed layout, pages that
+import a changed component (following aliases and workspace packages), and home plus a few
+well-linked pages for app-wide styles. It prints JSON with each route's reasons and
+confidence, `needsExample` (dynamic routes it can't fill in), and `unmatched` (UI files it
+couldn't place). Treat it as a starting list and apply judgement using
+`references/route-mapping.md`: drop low-confidence picks the diff doesn't support, find ids
+for `needsExample`, and place `unmatched` files yourself. If nothing UI-related changed (all
+files `ignored`), say so and stop. Don't produce an empty report.
 
 **Storybook projects** (a `.storybook/` folder or a `storybook` script): when the change is
 mostly to components, diff their stories instead of pages with `run.sh --storybook`; it
@@ -62,6 +68,9 @@ a modal state). They go in the summary so "no visual change" isn't read as an al
 bash $SKILL/scripts/run.sh --routes "/,/pricing" [--head <sha>] [--base <ref>] \
   [--viewports "desktop:1440x900,mobile:iPhone 13"] [--schemes light,dark] [--dev "<cmd with {port}>"]
 ```
+
+(`--auto-routes` adds the routes `routes.cjs` picks, logged with reasons; use it when you
+have no corrections to make.)
 
 In one go, it:
 - installs the tools on first use (Playwright + Chromium in `~/.cache/ui-diff`, about a minute; the project's dependencies are untouched);

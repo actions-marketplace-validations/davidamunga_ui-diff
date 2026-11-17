@@ -211,6 +211,15 @@ node "$S/capture.cjs" --url "http://localhost:$CK_PORT" --out "$TMP/ck2" --route
 kill "$CK_PID" 2>/dev/null
 expect "$TMP/ck2/home__desktop.issues.json" "$FX"' !fx("a11y").length && !fx("textClipping").length && !fx("offscreen").length && fx("overlap").length === 1'"$XF" "config: checks turned off and selectors ignored"
 
+section "unit: changed files → routes (routes.cjs, every framework convention)"
+node "$HERE/routes-unit.cjs" "$S" "$FIX/routes" > "$TMP/routes-unit.out" 2>&1
+cat "$TMP/routes-unit.out"
+PASS=$((PASS + $(grep -c '✓' "$TMP/routes-unit.out"))); FAIL=$((FAIL + $(grep -c '✗' "$TMP/routes-unit.out")))
+grep -q '✓' "$TMP/routes-unit.out" || { echo "  ✗ routes-unit.cjs didn't run"; FAIL=$((FAIL + 1)); }
+RT="$FIX/routes/next-app"
+check "--print gives a comma list" test "$(echo src/components/Button.tsx | node "$S/routes.cjs" --root "$RT" --changed - --print)" = "/pricing"
+check "--log explains picks and dynamic routes on stderr" bash -c "echo src/components/Button.tsx | node '$S/routes.cjs' --root '$RT' --changed - --log 2>&1 >/dev/null | grep -q 'blog/\[slug\] needs an example'"
+
 # ---------------------------------------------------------------------------------
 section "e2e: static site — style changes, new page, unchanged page"
 REPO="$TMP/static"
@@ -401,9 +410,23 @@ expect "$TMP/gh-output" 'has(d, "skipped=true")' "sets skipped=true"
 check "fork PR → no gh calls" test ! -s "$GH_LOG"
 
 event synchronize acme/demo
-ci "$TMP/ci-noroutes.err"
-check "no routes and no .ui-diff.json → fails" test $? != 0
+: > "$TMP/gh-output"
+ci "$TMP/ci-auto.err"
+check "no routes given → picks them from the diff, exits 0" test $? = 0
+expect "$TMP/ci-auto.err" '(() => { const l = (d.split("picked from the diff: ")[1] || "").split("\n")[0].split(","); return ["/", "/pricing.html", "/new.html"].every((r) => l.includes(r)) && !l.includes("/about.html"); })()' "logs the routes it picked (not the untouched page)"
+expect "$TMP/ci-auto.err" 'has(d, "routes from the diff (html):") && has(d, "imports style.css")' "logs why each route was picked"
+expect "$TMP/gh-output" 'has(d, "added=1") && has(d, "errors=0")' "captures them (new page reported as new)"
+ci "$TMP/ci-noroutes.err" UI_DIFF_AUTO_ROUTES=false
+check "auto-routes off, no routes → fails" test $? != 0
 expect "$TMP/ci-noroutes.err" 'has(d, "no routes to capture") && has(d, "routes")' "says how to give routes"
+# A docs-only PR: nothing visual, so it's skipped rather than failed.
+(cd "$REPO" && git checkout -q -b docs-only && echo "# notes" > CHANGES.md && git add CHANGES.md && commit "docs" && git push -q origin docs-only && git checkout -q feature)
+git -C "$TMP/ci" fetch -q origin docs-only
+printf '{"action":"synchronize","number":8,"pull_request":{"number":8,"base":{"sha":"%s"},"head":{"sha":"%s","repo":{"full_name":"acme/demo"}}}}' \
+  "$HEAD_SHA" "$(git -C "$REPO" rev-parse docs-only)" > "$TMP/event.json"
+ci "$TMP/ci-docs.err"
+check "docs-only PR → skipped, exits 0" test $? = 0
+expect "$TMP/ci-docs.err" 'has(d, "none of the changed files affect a page")' "explains why it skipped"
 ci "$TMP/ci-badmode.err" UI_DIFF_MODE=bogus
 check "unknown mode → fails" test $? != 0
 
@@ -547,6 +570,13 @@ expect "$REPO/.ui-diff/report/measured.md" 'has(d, "`letter-spacing`")' "uncommi
 expect "$REPO/.ui-diff/report/results.json" 'd.items.some((i) => (i.regions || []).some((r) => r.zoom)) && !JSON.stringify(d).includes("flip")' 'config "animate": false → zoom crops but no flips'
 check "no flip files written" test -z "$(find "$REPO/.ui-diff/report" -name '*__flip.png')"
 git checkout -q -- style.css
+
+section "e2e: --auto-routes picks the pages from the diff (routes.cjs)"
+bash "$S/run.sh" --base main --auto-routes > /dev/null 2> "$TMP/auto.err"
+check "run.sh --auto-routes exits 0" test $? = 0
+expect "$REPO/.ui-diff/report/run.json" 'JSON.stringify([...d.routes].sort()) === JSON.stringify(["/", "/new.html", "/pricing.html"])' "captures /, /pricing.html and the new page; not the untouched /about.html"
+expect "$TMP/auto.err" 'has(d, "/pricing.html [high]") && has(d, "new page new.html") && has(d, "imports style.css")' "logs each route with its reasons"
+check "routes.cjs --base in the repo (git mode) agrees" test "$(node "$S/routes.cjs" --base main --print | tr ',' '\n' | sort | tr '\n' ,)" = "/,/new.html,/pricing.html,"
 
 section "e2e: failures are reported and cleaned up"
 bash "$S/run.sh" --base HEAD~1 --dev "sh -c 'echo boom >&2; exit 3'" > /dev/null 2> "$TMP/fail.err"

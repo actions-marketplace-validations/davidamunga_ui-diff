@@ -5,7 +5,7 @@
 #
 # Usage: run.sh [--base <ref>] [--head <ref>] [--routes "/,/pricing"] [--viewports "desktop:1440x900,mobile:iPhone 13"]
 #               [--schemes light,dark] [--dev "<command with {port}>"] [--config <file>] [--keep]
-#               [--storybook [--stories "id1,id2"]]
+#               [--storybook [--stories "id1,id2"]] [--auto-routes]
 #
 #   --base   default: the open PR's base branch, else origin's default branch, else main/master
 #   --head   a commit/ref to render instead of the working tree (use the PR's head SHA when
@@ -13,6 +13,7 @@
 #   --keep   leave servers' worktrees in place afterwards (for debugging)
 #   --storybook  diff Storybook stories instead of pages (also config "storybook": true); the
 #            stories are picked from the changed files (stories.cjs), or given with --stories
+#   --auto-routes  add the routes routes.cjs picks from the changed files (logged with reasons)
 #
 # Output: .ui-diff/report/ — results.json, run.json, measured.md, index.html (review page) and the images.
 # Servers are started in their own process groups and only those groups are stopped;
@@ -23,7 +24,7 @@ S="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 WORK="$ROOT/.ui-diff"
-BASE_ARG="" HEAD_ARG="" ROUTES="" VIEWPORTS="" SCHEMES="" DEV="" KEEP=0 SB=0 STORIES=""
+BASE_ARG="" HEAD_ARG="" ROUTES="" VIEWPORTS="" SCHEMES="" DEV="" KEEP=0 SB=0 STORIES="" AUTO=0
 CONFIG=""; [ -f "$ROOT/.ui-diff.json" ] && CONFIG="$ROOT/.ui-diff.json"
 
 while [ $# -gt 0 ]; do
@@ -38,6 +39,7 @@ while [ $# -gt 0 ]; do
     --keep) KEEP=1; shift ;;
     --storybook) SB=1; shift ;;
     --stories) STORIES="$2"; SB=1; shift 2 ;;
+    --auto-routes) AUTO=1; shift ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -161,6 +163,16 @@ if [ -n "$HEAD_ARG" ]; then
   [ -n "$APP" ] && [ ! -e "$HEAD_DIR$APP/node_modules" ] && prepare_deps "$HEAD_DIR" "$APP"
 else
   HEAD_DIR="$ROOT"
+fi
+
+# --- routes from the diff (--auto-routes) ------------------------------------------
+if [ "$AUTO" = 1 ] && [ "$SB" = 0 ]; then
+  RA=(--root "$HEAD_DIR" --base "$BASE_SHA" --routes "$ROUTES" --log --print)
+  [ -n "$HEAD_ARG" ] && RA+=(--head "$HEAD_SHA")
+  [ -n "$CONFIG" ] && RA+=(--config "$CONFIG")
+  AUTO_ROUTES="$(node "$S/routes.cjs" "${RA[@]}")" || die "couldn't work out routes from the diff; pass --routes"
+  [ -n "$AUTO_ROUTES" ] || [ -n "$ROUTES" ] || [ -n "$(cfg routes)" ] || die "no routes found for the changed files; pass --routes \"/,/page\""
+  ROUTES="${ROUTES:+$ROUTES,}$AUTO_ROUTES"; ROUTES="${ROUTES%,}"
 fi
 
 # --- servers ----------------------------------------------------------------------

@@ -5,7 +5,7 @@
 # payload, local bare remote, stub gh).
 #
 # Inputs come from env (action.yml maps them): UI_DIFF_MODE, UI_DIFF_ROUTES, UI_DIFF_DEV,
-# UI_DIFF_VIEWPORTS, UI_DIFF_SCHEMES, UI_DIFF_BASE, UI_DIFF_CONFIG, UI_DIFF_SUMMARY,
+# UI_DIFF_VIEWPORTS, UI_DIFF_SCHEMES, UI_DIFF_BASE, UI_DIFF_CONFIG, UI_DIFF_SUMMARY, UI_DIFF_AUTO_ROUTES,
 # UI_DIFF_REQUIRE_APPROVAL, UI_DIFF_APPROVAL_LABEL, plus GH_TOKEN and the standard GITHUB_*
 # variables. Outputs go to $GITHUB_OUTPUT.
 #
@@ -77,15 +77,18 @@ if [ "$MODE" = prune ] || [ "$ACTION" = closed ]; then
   exit 0
 fi
 
-# --- routes: no agent to infer them, so they must be given --------------------------
+# --- routes: given, in .ui-diff.json, or picked from the diff (routes.cjs) -----------
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || fail "not inside a git checkout; add actions/checkout before this action (or set working-directory)"
 CONFIG="${UI_DIFF_CONFIG:-}"
 [ -n "$CONFIG" ] || { [ -f "$ROOT/.ui-diff.json" ] && CONFIG="$ROOT/.ui-diff.json"; } || true
 [ -z "$CONFIG" ] || [ -f "$CONFIG" ] || fail "config file $CONFIG not found"
 CFG_ROUTES=0
 [ -z "$CONFIG" ] || CFG_ROUTES="$(node -e 'console.log((require(require("path").resolve(process.argv[1])).routes || []).length)' "$CONFIG")"
+AUTO=0
 if [ -z "${UI_DIFF_ROUTES:-}" ] && [ "$CFG_ROUTES" = 0 ]; then
-  fail "no routes to capture. Set the 'routes' input (e.g. routes: /,/pricing) or add \"routes\" to .ui-diff.json. In CI there's no agent to work them out from the diff."
+  [ "${UI_DIFF_AUTO_ROUTES:-true}" != false ] ||
+    fail "no routes to capture. Set the 'routes' input (e.g. routes: /,/pricing) or add \"routes\" to .ui-diff.json (auto-routes is off)."
+  AUTO=1
 fi
 
 # --- commits: run.sh needs both, plus their merge-base -----------------------------
@@ -96,6 +99,21 @@ else
   for sha in "$BASE_SHA" "$HEAD_SHA"; do
     git cat-file -e "$sha^{commit}" 2>/dev/null || git fetch -q --no-tags origin "$sha"
   done
+fi
+
+# --- routes from the changed files ---------------------------------------------------
+if [ "$AUTO" = 1 ]; then
+  RA=(--root "$ROOT" --base "${UI_DIFF_BASE:-$BASE_SHA}" --head "$HEAD_SHA" --log)
+  [ -z "$CONFIG" ] || RA+=(--config "$CONFIG")
+  mkdir -p "$ROOT/.ui-diff"
+  node "$S/routes.cjs" "${RA[@]}" > "$ROOT/.ui-diff/routes.json" || fail "couldn't work out routes from the diff. Set the 'routes' input."
+  # Routes found, or "-" plus whether every changed file was non-UI (tests, docs, API…).
+  read -r UI_DIFF_ROUTES NON_UI_ONLY < <(node -e 'const r=require(process.argv[1]);console.log(r.routes.map((x)=>x.path).join(",")||"-",r.unmatched.length+r.needsExample.length?0:1)' "$ROOT/.ui-diff/routes.json")
+  if [ "$UI_DIFF_ROUTES" = - ]; then
+    [ "$NON_UI_ONLY" = 0 ] || skip "none of the changed files affect a page (only tests, docs, API or config changed)"
+    fail "no routes found for the changed files (see the log above). Set the 'routes' input (e.g. routes: /,/pricing), or routeParams in .ui-diff.json for dynamic routes."
+  fi
+  note "capturing routes picked from the diff: $UI_DIFF_ROUTES"
 fi
 
 # --- tools: Chromium needs system libraries the runner may not have ------------------

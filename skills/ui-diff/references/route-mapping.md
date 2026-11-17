@@ -5,6 +5,35 @@ Screenshot too few and you miss the change; too many and the run is slow and the
 Aim for every route that renders a changed file, plus at most a couple of "canary" pages
 (e.g. home) when a global file changed.
 
+## Start from `scripts/routes.cjs`
+
+`node $SKILL/scripts/routes.cjs --base <base> --log` applies the rules below mechanically
+and prints `{routes: [{path, reasons, confidence}], needsExample, unmatched, ignored, omitted,
+framework, appDir}` (`--print` gives just a comma list). What it does:
+
+- **Finds the app**: in a monorepo, the package with a framework dependency (the one the
+  root `dev` script names wins), or `appDir` from `.ui-diff.json`. Then discovers routes
+  from the file system per framework (see conventions below), at head, plus base's pages so
+  a deleted page shows up as removed.
+- **Page / route file** → that route (`high`). **Layout** → every route under it (`medium`).
+- **Component** → walks the reverse import graph up to the pages: relative imports,
+  tsconfig/jsconfig `paths`, `@/` `~/` `$lib/`, workspace packages by name (a package
+  built to `dist/` is mapped back to `src/`), HTML `<link>`/`<script>`, CSS `@import`/`url()`,
+  assets referenced by file name, and Vue components used by tag (Nuxt auto-imports).
+  Closer importers rank higher.
+- **App-wide** (root layout, `_app`, `app.vue`, `main.tsx`, global CSS reaching them,
+  tailwind/theme/tokens/fonts) → home plus the 3 most-linked, shallowest pages (`medium`).
+- **Non-UI** (tests, stories, docs, lockfiles, CI, API/server routes) → `ignored`.
+- **Dynamic routes** are only included with an example from `routeParams` or a known route
+  (`--routes`, config `routes`); otherwise they're listed in `needsExample`.
+- Caps at 8 routes (`--max`, config `maxRoutes`); the rest are in `omitted`.
+
+Then apply judgement: it can't tell that a component is only used in a modal, or that a
+barrel `index.ts` re-export doesn't mean every importer renders the changed piece (it
+follows such re-exports, so check `via …index.ts` reasons). Add routes for `unmatched`
+files, find ids for `needsExample`, and trim when the list is long. The rest of this file is
+how to do that by hand.
+
 ## Classify changed files first
 
 | Kind | Examples | What to capture |
@@ -50,7 +79,8 @@ say so in the report.
 ## Dynamic routes
 
 A route like `/users/[id]` needs a real value. In order of preference:
-1. A value already in `.ui-diff.json` (`routes: [{ "path": "/users/42" }]`).
+1. A value already in `.ui-diff.json` (`routes: [{ "path": "/users/42" }]`, or
+   `routeParams: { "id": "42" }`, which `routes.cjs` uses from then on).
 2. A fixture/seed/mock id you can find in the repo (grep seeds, MSW handlers, Storybook args).
 3. Load the parent list page in the running app and pick the first link.
 4. Ask the user.
@@ -80,8 +110,8 @@ and picks stories with `scripts/stories.cjs`:
 Each story is captured at `iframe.html?id=<id>&viewMode=story`, named by its id, at a
 smaller default viewport (1024×768 + iPhone 13). A story only on head is reported as new,
 one only on base as removed, and a story that fails to render gets a warning. Changed files
-no story covers are logged as `no story found for: …`. Imports through package names
-(`@acme/ui`) or aliases other than `@/` and `~/` aren't followed; then pass ids yourself:
+no story covers are logged as `no story found for: …`. Relative, `@/` `~/` and tsconfig
+`paths` imports are followed; package names (`@acme/ui`) aren't, so then pass ids yourself:
 `--stories "button--primary,card--*"`.
 
 Prefer pages when the change is to routes, layouts or app-level styles, or when the PR is

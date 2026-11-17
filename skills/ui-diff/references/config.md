@@ -37,6 +37,9 @@ Saves what you'd otherwise rediscover every run. Everything is optional.
 | `readyPath` | Polled until it answers before capturing. |
 | `copyFiles` | Extra untracked files or directories to copy into the worktrees, relative to the repo root (untracked `.env*` files are copied automatically). A directory is copied recursively, skipping `node_modules`, `.git` and `.ui-diff`; use it for gitignored generated code the dev server needs, such as an API client. |
 | `routes` | Always-captured routes, on top of the ones inferred from the diff. Give a unique `name` when the same path appears twice (e.g. with different `actions`). |
+| `routeParams` | Example values for dynamic routes, so `routes.cjs` (and the Action) can include them: by param name `{ "id": "42", "slug": "hello-world" }`, or by route `{ "/blog/[slug]": "/blog/hello-world" }`. |
+| `appDir` | In a monorepo, the package whose routes to map changed files to (e.g. `"apps/web"`); detected when absent. |
+| `maxRoutes` | Cap on routes picked from the diff (default 8). |
 | `figma` | Figma frame link to compare the head screenshot with: a string (first viewport) or `{ "<viewport>": "<url>" }`. See `figma.md`. |
 | `actions` | Steps before the screenshot: `{click}`, `{hover}`, `{fill: [sel, value]}`, `{press: key}`, `{wait: ms or selector}`. |
 | `viewports` | Name → `{width, height}` for a desktop window, or `{device: "<Playwright device>"}` (e.g. `"iPhone 13"`, `"Pixel 7"`, `"iPad Mini"`) for real mobile emulation: touch, mobile UA, `isMobile`. |
