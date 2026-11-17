@@ -174,7 +174,8 @@ img { display: block; max-width: 100%; height: auto; }
 .handle::after { content: "⇔"; position: absolute; top: min(50%, 45vh); width: 28px; height: 28px; margin: -14px 0 0 -13px; border-radius: 50%; background: var(--accent); color: #fff; text-align: center; line-height: 28px; font-size: 14px; }
 .handle:focus-visible::after { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
 .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; background: rgba(0,0,0,.6); color: #fff; padding: 1px 6px; border-radius: 4px; }
-.stage .tag { position: absolute; top: 8px; } .stage .tag.l { left: 8px; } .stage .tag.r { right: 8px; }
+.stage .tag { position: absolute; bottom: 8px; transition: opacity .15s; } .stage .tag.l { left: 8px; } .stage .tag.r { right: 8px; }
+.stage:hover .tag { opacity: 0; } /* tags sit over the screenshot; get out of the way while inspecting */
 .side { display: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .view[data-mode="side"] .stage { display: none; } .view[data-mode="side"] .side { display: grid; }
 .side .diffpane { display: none; } .diff-on .side { grid-template-columns: repeat(3, minmax(0, 1fr)); } .diff-on .side .diffpane { display: block; }
