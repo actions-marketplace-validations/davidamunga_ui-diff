@@ -117,7 +117,7 @@ copy_untracked() {
     done
 }
 
-lockfile() { for l in pnpm-lock.yaml yarn.lock package-lock.json bun.lock bun.lockb; do [ -f "$1/$l" ] && { echo "$l"; return; }; done; }
+lockfile() { for l in pnpm-lock.yaml yarn.lock package-lock.json bun.lock bun.lockb; do [ -f "$1/$l" ] && { echo "$l"; return; }; done; return 0; } # none: empty, not a failure
 
 # prepare_deps <checkout> [/sub/dir]: install or link deps in the checkout (or a package inside it).
 prepare_deps() {

@@ -82,6 +82,8 @@ check "next + pnpm"  test "$(node "$S/devcmd.cjs" "$TMP/dc/next")" = "pnpm run d
 check "static html"  test "$(node "$S/devcmd.cjs" "$TMP/dc/static")" = "python3 -m http.server {port}"
 check "nothing to run → error" bash -c "! node '$S/devcmd.cjs' '$TMP/dc/none'"
 
+check "no lockfile is not an error under set -e (run.sh lockfile)" bash -c "set -euo pipefail; eval \"\$(grep '^lockfile()' '$S/run.sh')\"; l=\"\$(lockfile '$TMP')\"; [ -z \"\$l\" ]"
+
 section "unit: dependency linking in a monorepo (linkdeps.cjs)"
 # src: an app whose node_modules holds a registry package and a workspace link (@acme/ui -> packages/ui).
 for r in src dst; do mkdir -p "$TMP/ld/$r/apps/web" "$TMP/ld/$r/packages/ui"; echo "$r" > "$TMP/ld/$r/packages/ui/index.js"; done
