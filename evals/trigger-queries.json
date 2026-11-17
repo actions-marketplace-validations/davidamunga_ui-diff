@@ -1,0 +1,23 @@
+[
+  {"query": "can you screenshot what my branch changed on the pricing page and drop it on the PR? it's #412, i reworked the plan cards in src/components/PricingTable.tsx", "should_trigger": true},
+  {"query": "we just bumped tailwind from 3.4 to 4.0 on the chore/tailwind-v4 branch. did it break any layouts? the app is next.js, `pnpm dev` runs it on :3000", "should_trigger": true},
+  {"query": "designer wants to see the new navbar before we merge. can you get her something visual from PR 88 without her having to pull the branch", "should_trigger": true},
+  {"query": "Before I request review on this branch, compare the settings and profile pages against main and tell me what actually looks different. I refactored our spacing tokens in styles/tokens.css and I'm nervous.", "should_trigger": true},
+  {"query": "pls add before/after imgs to the description of my open pr, reviewers keep asking what the modal redesign looks like", "should_trigger": true},
+  {"query": "I swapped our primary brand color from #2563eb to #4f46e5 across the Vue app. Can you check whether contrast got worse anywhere and summarize the visual changes for the design team on the PR?", "should_trigger": true},
+  {"query": "run a visual regression check on https://github.com/acme/storefront/pull/1290 — it touches the checkout flow and product grid", "should_trigger": true},
+  {"query": "our PM doesn't read code. write up what this PR changes for users on the dashboard, with pictures, and post it as a PR comment", "should_trigger": true},
+  {"query": "i upgraded @mui/material to v6 in this branch, the diff is huge and mostly lockfile. how do I know if anything shifted visually on the marketing site (astro, npm run dev)?", "should_trigger": true},
+  {"query": "Quick design QA before merge: the head of feat/dark-mode-toggle vs base — show me side by side what the header and footer look like now", "should_trigger": true},
+
+  {"query": "review PR #301 for me — it's the new rate limiter middleware in api/middleware/ratelimit.go and the redis config changes. look for race conditions", "should_trigger": false},
+  {"query": "write playwright e2e tests for the signup flow in apps/web: fill the form, submit, assert we land on /welcome. put them in tests/e2e/signup.spec.ts", "should_trigger": false},
+  {"query": "take a full-page screenshot of https://stripe.com/pricing so I can paste it into our competitor analysis doc", "should_trigger": false},
+  {"query": "the dropdown in components/UserMenu.vue is getting clipped by the header because of overflow hidden somewhere. can you fix the css?", "should_trigger": false},
+  {"query": "generate a PR description for my current branch from the commits — summary, motivation, testing notes. no need for screenshots, it's a refactor of the auth service", "should_trigger": false},
+  {"query": "compare the Figma frames for the onboarding v2 and v3 designs and list what the designers changed between them", "should_trigger": false},
+  {"query": "my SwiftUI app's settings screen looks different after the iOS 18 update, can you help me figure out which modifiers changed the padding?", "should_trigger": false},
+  {"query": "set up Chromatic visual testing in CI for our Storybook so every component story gets snapshotted on each push", "should_trigger": false},
+  {"query": "diff these two JSON API responses and tell me which fields changed between v1 and v2 of the /orders endpoint", "should_trigger": false},
+  {"query": "convert this navbar component from styled-components to tailwind classes, keep it looking identical", "should_trigger": false}
+]
