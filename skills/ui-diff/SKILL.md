@@ -87,6 +87,9 @@ look in context. If you can't view images, write the summary from `measured.md` 
 say the screenshots weren't reviewed. Check
 `results.json` for `warnings` too: HTTP errors, framework error overlays, uncaught exceptions.
 
+**Figma link given** (or a route in `.ui-diff.json` has `figma`)? Also compare head with the
+design frame. Follow `references/figma.md`.
+
 Write `.ui-diff/report/summary.md` for a designer or PM who won't read the code:
 
 ```markdown

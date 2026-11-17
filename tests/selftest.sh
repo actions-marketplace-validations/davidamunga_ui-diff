@@ -91,6 +91,69 @@ node "$S/linkdeps.cjs" "$TMP/ld/src" "$TMP/ld/dst" >/dev/null
 check "workspace package resolves to the worktree's own source" test "$(cat "$TMP/ld/dst/apps/web/node_modules/@acme/ui/index.js")" = dst
 check "registry packages are shared with the checkout" test "$(cd "$TMP/ld/dst/apps/web/node_modules/react" && pwd -P)" = "$(cd "$TMP/ld/src/apps/web/node_modules/react" && pwd -P)"
 
+section "unit: Figma link parsing (figma-export.cjs)"
+node -e '
+const { parseFigmaUrl } = require(process.argv[1]);
+const ok = [
+  ["https://www.figma.com/design/AbC123/My-App?node-id=1-2&t=x", "AbC123", "1:2"],
+  ["https://figma.com/file/KEY9/Old?node-id=12%3A34", "KEY9", "12:34"],
+  ["https://www.figma.com/design/MAIN/branch/BR7/App?node-id=5-6", "BR7", "5:6"],
+  ["https://www.figma.com/proto/P1/x?node-id=I1-2%3B3-4", "P1", "I1:2;3:4"],
+];
+for (const [u, key, id] of ok) {
+  const r = parseFigmaUrl(u);
+  if (r.fileKey !== key || r.nodeId !== id) { console.error(u, r); process.exit(1); }
+}
+for (const bad of ["https://www.figma.com/design/AbC123/My-App", "https://example.com/design/a/b?node-id=1-2", "nope", "https://www.figma.com/design/A/b?node-id=x-y"]) {
+  try { parseFigmaUrl(bad); console.error("accepted", bad); process.exit(1); } catch {}
+}
+' "$S/figma-export.cjs"
+check "file key + node id (1-2 → 1:2, encoded, branch, instance); rejects bad links" test $? = 0
+check "no FIGMA_TOKEN → exit 2" bash -c "env -u FIGMA_TOKEN node '$S/figma-export.cjs' 'https://www.figma.com/design/A/b?node-id=1-2' --out '$TMP/x.png'; test \$? = 2"
+
+section "unit: design vs implementation (compare.cjs)"
+mkdir -p "$TMP/cmp"
+cat > "$TMP/cmp/gen.cjs" <<'JS'
+// design.png: 400×300 @1x. same.png: identical @2x plus sparse 1px noise.
+// shifted.png: @2x, the blue button moved 60px right, page 60px taller with a footer.
+const { need, writePng, blank } = require(process.argv[2] + '/lib.cjs');
+need('pngjs');
+function draw(scale, shift, extraH, noise) {
+  const img = blank(400 * scale, (300 + extraH) * scale);
+  const rect = (x, y, w, h, c) => {
+    for (let yy = y * scale; yy < (y + h) * scale; yy++)
+      for (let xx = x * scale; xx < (x + w) * scale; xx++) img.data.set([...c, 255], (yy * img.width + xx) * 4);
+  };
+  rect(0, 0, 400, 40, [17, 24, 39]);
+  for (let r = 0; r < 4; r++) rect(40, 70 + r * 22, 300 - r * 40, 10, [75, 85, 99]);
+  rect(50 + shift, 200, 120, 40, [37, 99, 235]);
+  if (extraH) rect(0, 300 + extraH - 20, 400, 20, [17, 24, 39]); // footer below the frame
+  if (noise) for (let i = 0; i < (img.width * img.height) / 200; i++) {
+    const p = ((i * 7919) % (img.width * img.height)) * 4;
+    img.data[p] = Math.max(0, img.data[p] - 60);
+  }
+  return img;
+}
+writePng(process.argv[3] + '/design.png', draw(1, 0, 0, false));
+writePng(process.argv[3] + '/same.png', draw(2, 0, 0, true));
+writePng(process.argv[3] + '/shifted.png', draw(2, 60, 60, false));
+JS
+node "$TMP/cmp/gen.cjs" "$S" "$TMP/cmp"
+C="$TMP/cmp/out"
+node "$S/compare.cjs" --design "$TMP/cmp/design.png" --actual "$TMP/cmp/same.png" --out "$C" > /dev/null
+check "compare.cjs exits 0" test $? = 0
+expect "$C/same.json" 'd.regions.length === 0 && d.compared.width === 400 && d.notes.length === 0' "same layout at 2× with pixel noise → nothing flagged"
+node "$S/compare.cjs" --design "$TMP/cmp/design.png" --actual "$TMP/cmp/shifted.png" --out "$C" --name btn --figma "https://www.figma.com/design/A/b?node-id=1-2" > /dev/null
+expect "$C/btn.json" 'd.regions.length >= 1 && d.regions.every((r) => r.y < 240 && r.y + r.height > 200) && d.regions.some((r) => r.x < 110) && d.regions.some((r) => r.x + r.width > 170)' "moved button is found where it was and where it is"
+expect "$C/btn.json" 'd.regions.every((r) => r.zoom) && d.figma && has(d.notes.join(), "only the top 300px")' "zoom crops, figma link, height-mismatch note"
+check "composite is design | implementation | diff wide" node -e '
+const { readPng } = require(process.argv[1] + "/lib.cjs");
+const c = readPng(process.argv[2]);
+process.exit(c.width > 3 * 400 && c.height > 300 ? 0 : 1);' "$S" "$C/btn__composite.png"
+check "zoom crop written" test -f "$C/zoom/btn__r1__actual.png"
+node "$S/compare.cjs" --design "$TMP/cmp/design.png" --actual "$TMP/cmp/shifted.png" --out "$C" --name padded --fit pad > /dev/null
+expect "$C/padded.json" 'd.compared.height === 360 && d.regions.some((r) => r.y + r.height >= 300)' "--fit pad compares the full height (extra length flagged)"
+
 # ---------------------------------------------------------------------------------
 section "e2e: static site — style changes, new page, unchanged page"
 REPO="$TMP/static"
@@ -150,6 +213,15 @@ expect "$TMP/comment.md" 'has(d, "Pages not listed were not checked")' "states c
 expect "$TMP/comment.md" 'has(d, "pr-1/abc1234/zoom/") && has(d, "?raw=true")' "image URLs use the published prefix"
 expect "$TMP/comment.md" 'has(d, "🆕 `/new.html`")' "new page section"
 expect "$TMP/comment.md" 'has(d, "<summary>Measured changes</summary>")' "measured changes section"
+
+section "e2e: vs design section (base screenshot standing in for the Figma frame)"
+node "$S/compare.cjs" --design "$REPO/.ui-diff/shots/before/pricing-html__desktop.png" --actual "$REPO/.ui-diff/shots/after/pricing-html__desktop.png" \
+  --out "$R/design" --name pricing-html__desktop --label "/pricing.html — desktop" --figma "https://www.figma.com/design/A/b?node-id=1-2" > /dev/null
+check "compare.cjs exits 0 on real screenshots" test $? = 0
+expect "$R/design/pricing-html__desktop.json" 'd.regions.length >= 1 && d.compared.width === 1440' "real restyle shows up as boxed areas"
+node "$S/comment.cjs" --report "$R" --base-url "https://github.com/acme/demo/blob/ui-diff-assets/pr-1/abc1234" --out "$TMP/comment-design.md"
+expect "$TMP/comment-design.md" 'has(d, "### 📐 vs design") && has(d, "pr-1/abc1234/design/pricing-html__desktop__composite.png") && has(d, "[Figma frame](https://www.figma.com/design/A/b?node-id=1-2)")' "comment gets a vs design section with published image URLs"
+expect "$TMP/comment.md" '!has(d, "vs design")' "no vs design section without compare results"
 
 section "e2e: publishing to the assets branch (local bare remote)"
 git init -q --bare "$TMP/remote.git"

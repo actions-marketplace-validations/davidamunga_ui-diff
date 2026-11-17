@@ -3,11 +3,13 @@
 //
 // Usage:
 //   node comment.cjs --report .ui-diff/report [--base-url <prefix from publish.sh>] \
-//     [--summary summary.md] [--out comment.md]
+//     [--summary summary.md] [--out comment.md] [--design <dir>]
 //
 // Omit --base-url to get relative image paths (for previewing, or manual upload mode).
 // Reads results.json (+ run.json for commits and coverage). The output is wrapped in
 // <!-- ui-diff:start/end --> markers so post.cjs can replace it on later runs.
+// Design comparisons from compare.cjs (<report>/design/*.json, or --design <dir> inside the
+// report) get a "vs design" section; results.json may be absent when that's all there is.
 const fs = require('fs');
 const path = require('path');
 const { args } = require('./lib.cjs');
@@ -18,7 +20,14 @@ if (!a.report) {
   process.exit(1);
 }
 const read = (f) => JSON.parse(fs.readFileSync(path.join(a.report, f), 'utf8'));
-const { summary, items } = read('results.json');
+const { summary, items } = fs.existsSync(path.join(a.report, 'results.json')) ? read('results.json') : { summary: null, items: [] };
+const designDir = a.design || path.join(a.report, 'design');
+const designRel = path.relative(a.report, designDir).split(path.sep).join('/');
+const designs = fs.existsSync(designDir)
+  ? fs.readdirSync(designDir).filter((f) => f.endsWith('.json')).sort()
+      .map((f) => JSON.parse(fs.readFileSync(path.join(designDir, f), 'utf8')))
+      .filter((d) => d.kind === 'ui-diff/design-compare')
+  : [];
 const run = fs.existsSync(path.join(a.report, 'run.json')) ? read('run.json') : null;
 const url = (rel) => (a['base-url'] ? `${a['base-url']}/${rel}?raw=true` : rel);
 const img = (rel, alt, width) => `<img src="${url(rel)}" alt="${alt}"${width ? ` width="${width}"` : ''}>`;
@@ -29,13 +38,14 @@ const out = ['<!-- ui-diff:start -->', '## 🎨 UI diff', ''];
 
 if (a.summary && fs.existsSync(a.summary)) out.push(fs.readFileSync(a.summary, 'utf8').trim(), '');
 
-const stats = [
+const stats = summary ? [
   summary.changed && `**${summary.changed} changed**`,
   summary.added && `${summary.added} new`,
   summary.removed && `${summary.removed} removed`,
   `${summary.unchanged} with no visual change`,
   summary.error && `⚠️ ${summary.error} failed`,
-].filter(Boolean);
+].filter(Boolean) : [];
+if (designs.length) stats.push(`${designs.length} compared with the design`);
 out.push(`<sub>${stats.join(' · ')}</sub>`);
 if (run) {
   const head = `\`${run.head.sha.slice(0, 7)}\`${run.head.dirty ? ' + uncommitted changes' : ''}`;
@@ -68,6 +78,22 @@ for (const i of items.filter((x) => x.status === 'added')) {
 
 for (const i of items.filter((x) => x.status === 'removed')) {
   out.push(`### 🗑️ \`${i.route || i.name}\` — ${label(i)}`, '', ...warn(i), img(`before/${i.file}`, 'removed', 400), '');
+}
+
+if (designs.length) {
+  out.push('### 📐 vs design', '<sub>Implementation (head) next to the Figma frame. Fonts, real data and rendering always differ a little; boxed areas are prompts for a look, not failures.</sub>', '');
+  for (const d of designs) {
+    const src = (rel) => `${designRel}/${rel}`;
+    const frame = d.figma ? `[Figma frame](${d.figma}) · ` : '';
+    out.push(`#### \`${d.label || d.name}\``, `<sub>${frame}${d.percent}% of pixels differ at ${d.compared.width}px wide · ${d.regions.length ? `${d.regions.length} area${d.regions.length === 1 ? '' : 's'} boxed` : 'nothing stood out'}</sub>`, '');
+    for (const n of d.notes || []) out.push(`> ℹ️ ${n}`);
+    const zoomed = d.regions.filter((r) => r.zoom);
+    if (zoomed.length) {
+      out.push('', '| Design | Implementation |', '|---|---|');
+      for (const r of zoomed) out.push(`| ${img(src(r.zoom.design), 'design')} | ${img(src(r.zoom.actual), 'implementation')} |`);
+    }
+    out.push('', `<details${zoomed.length ? '' : ' open'}><summary>Design · implementation · diff</summary>`, '', img(src(d.composite), 'design, implementation and diff side by side'), '', '</details>', '');
+  }
 }
 
 const errors = items.filter((x) => x.status === 'error');

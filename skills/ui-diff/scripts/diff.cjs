@@ -11,86 +11,9 @@
 // plus results.json describing everything (consumed by comment.cjs).
 const fs = require('fs');
 const path = require('path');
-const { need, args } = require('./lib.cjs');
+const { need, args, readPng, writePng, padTo, crop, findRegions } = require('./lib.cjs');
 const { PNG } = need('pngjs');
 const pixelmatch = need('pixelmatch');
-
-const GRID = 24; // px; diff pixels are clustered on this grid to find separate regions
-const PAD = 32; // px of context around each zoomed region
-const MAX_REGIONS = 6;
-
-const readPng = (p) => PNG.sync.read(fs.readFileSync(p));
-const writePng = (p, png) => {
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, PNG.sync.write(png));
-};
-
-// Place img on a w×h canvas (top-left), filling the rest with opaque white,
-// so pages of different heights can still be compared; the padding shows up as change.
-function padTo(img, w, h) {
-  if (img.width === w && img.height === h) return img;
-  const out = new PNG({ width: w, height: h });
-  out.data.fill(255);
-  PNG.bitblt(img, out, 0, 0, img.width, img.height, 0, 0);
-  return out;
-}
-
-function crop(img, { x, y, w, h }) {
-  const out = new PNG({ width: w, height: h });
-  PNG.bitblt(img, out, x, y, w, h, 0, 0);
-  return out;
-}
-
-// Group diff pixels (pure red in pixelmatch output) into rectangular regions.
-function findRegions(diff) {
-  const gw = Math.ceil(diff.width / GRID);
-  const gh = Math.ceil(diff.height / GRID);
-  const cells = new Uint8Array(gw * gh);
-  for (let y = 0; y < diff.height; y++) {
-    for (let x = 0; x < diff.width; x++) {
-      const i = (y * diff.width + x) * 4;
-      if (diff.data[i] === 255 && diff.data[i + 1] === 0 && diff.data[i + 2] === 0) {
-        cells[Math.floor(y / GRID) * gw + Math.floor(x / GRID)] = 1;
-      }
-    }
-  }
-  // Connected components over the grid, allowing a 1-cell gap so nearby edits merge.
-  const seen = new Uint8Array(gw * gh);
-  const boxes = [];
-  for (let c = 0; c < cells.length; c++) {
-    if (!cells[c] || seen[c]) continue;
-    let [x0, y0, x1, y1] = [Infinity, Infinity, -1, -1];
-    let count = 0;
-    const stack = [c];
-    seen[c] = 1;
-    while (stack.length) {
-      const k = stack.pop();
-      const cx = k % gw;
-      const cy = (k - cx) / gw;
-      x0 = Math.min(x0, cx); y0 = Math.min(y0, cy); x1 = Math.max(x1, cx); y1 = Math.max(y1, cy);
-      count++;
-      for (let dy = -2; dy <= 2; dy++) {
-        for (let dx = -2; dx <= 2; dx++) {
-          const nx = cx + dx, ny = cy + dy;
-          if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
-          const n = ny * gw + nx;
-          if (cells[n] && !seen[n]) { seen[n] = 1; stack.push(n); }
-        }
-      }
-    }
-    const x = Math.max(0, x0 * GRID - PAD);
-    const y = Math.max(0, y0 * GRID - PAD);
-    boxes.push({
-      x, y,
-      w: Math.min(diff.width, (x1 + 1) * GRID + PAD) - x,
-      h: Math.min(diff.height, (y1 + 1) * GRID + PAD) - y,
-      cells: count,
-    });
-  }
-  boxes.sort((a, b) => b.cells - a.cells);
-  const kept = boxes.slice(0, MAX_REGIONS).sort((a, b) => a.y - b.y || a.x - b.x);
-  return { kept, omitted: boxes.length - kept.length };
-}
 
 // An HTTP error page on one side means the route only exists on the other side.
 const isErrorPage = (m) => !m || m.error || (m.status && m.status >= 400);
@@ -131,6 +54,7 @@ function main() {
     const mA = after.get(file);
     const meta = { ...(mB || {}), ...(mA || {}) };
     const item = { file, name: meta.name, route: meta.route, viewport: meta.viewport, scheme: meta.scheme };
+    if (meta.figma) item.figma = meta.figma;
     const warnings = [...warningsFor('base', mB), ...warningsFor('head', mA)];
     if (warnings.length) item.warnings = warnings;
     let hasB = exists(a.before, file);

@@ -64,6 +64,14 @@ function mergeRoutes(cfgRoutes, cliRoutes) {
   return list.map((r) => ({ name: r.name || slug(r.path), ...r }));
 }
 
+// A route's Figma frame for one viewport: a string means the first viewport,
+// an object maps viewport name → frame URL (see references/figma.md).
+function figmaFor(route, vpName, firstVp) {
+  const f = route.figma;
+  if (!f) return null;
+  return typeof f === 'string' ? (vpName === firstVp ? f : null) : f[vpName] || null;
+}
+
 // Bring the page into a state a plain load doesn't show (open modal, hover, filled form).
 // Each action is one of: {click}, {hover}, {fill: [selector, value]}, {press: key}, {wait: ms|selector}
 async function runAction(page, act) {
@@ -201,6 +209,8 @@ async function main() {
         const url = new URL(route.path, a.url).toString();
         const file = `${route.name}__${vpName}${schemes.length > 1 ? `__${scheme}` : ''}.png`;
         const entry = { route: route.path, name: route.name, viewport: vpName, scheme, file, url };
+        const figma = figmaFor(route, vpName, Object.keys(viewports)[0]);
+        if (figma) entry.figma = figma;
         try {
           const resp = await page.goto(url, { waitUntil: 'load', timeout: 60000 });
           entry.status = resp ? resp.status() : null;

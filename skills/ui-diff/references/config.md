@@ -12,6 +12,7 @@ Saves what you'd otherwise rediscover every run. Everything is optional.
     "/",
     "/pricing",
     { "path": "/users/42", "name": "user-profile", "waitFor": "[data-testid=profile]" },
+    { "path": "/pricing", "figma": "https://www.figma.com/design/AbC123/App?node-id=12-34" },
     { "path": "/settings", "name": "settings-delete-modal",
       "actions": [{ "click": "text=Delete account" }, { "wait": "[role=dialog]" }] }
   ],
@@ -34,6 +35,7 @@ Saves what you'd otherwise rediscover every run. Everything is optional.
 | `readyPath` | Polled until it answers before capturing. |
 | `copyFiles` | Extra untracked files or directories to copy into the worktrees, relative to the repo root (untracked `.env*` files are copied automatically). A directory is copied recursively, skipping `node_modules`, `.git` and `.ui-diff`; use it for gitignored generated code the dev server needs, such as an API client. |
 | `routes` | Always-captured routes, on top of the ones inferred from the diff. Give a unique `name` when the same path appears twice (e.g. with different `actions`). |
+| `figma` | Figma frame link to compare the head screenshot with: a string (first viewport) or `{ "<viewport>": "<url>" }`. See `figma.md`. |
 | `actions` | Steps before the screenshot: `{click}`, `{hover}`, `{fill: [sel, value]}`, `{press: key}`, `{wait: ms or selector}`. |
 | `viewports` | Name → `{width, height}` for a desktop window, or `{device: "<Playwright device>"}` (e.g. `"iPhone 13"`, `"Pixel 7"`, `"iPad Mini"`) for real mobile emulation: touch, mobile UA, `isMobile`. |
 | `deviceScaleFactor` | Pixel density for all viewports (default 1 for desktop, the device's value capped at 2 for devices). |

@@ -16,7 +16,8 @@ Run it on a branch and your agent will:
 5. **Measure** the change: compare every element's computed styles to get exact values ("padding 8×14 → 12×20px", "`#2563EB` → `#9CA3AF`"), spot layout shifts and copy changes, and flag new WCAG contrast failures.
 6. Write a short design summary from those measurements and the images, leading with what looks unintended.
 7. Write a local review page (`.ui-diff/report/index.html`) with a before/after slider, side-by-side and diff overlay views.
-8. Post it to the PR as a comment, or as a section of the PR description. Re-runs update the same comment instead of adding new ones.
+8. Optionally, compare the result with the **Figma** frame you link, side by side with the differing areas boxed ([`figma.md`](skills/ui-diff/references/figma.md)).
+9. Post it to the PR as a comment, or as a section of the PR description. Re-runs update the same comment instead of adding new ones.
 
 ## Install
 
@@ -78,6 +79,11 @@ Just ask:
 
 > ui diff for PR #482, put it in the description
 
+> does /pricing match the design? https://www.figma.com/design/AbC123/App?node-id=12-34
+
+For Figma comparisons the agent uses its Figma tool (e.g. the Figma MCP server) if it has
+one, otherwise the Figma REST API with a `FIGMA_TOKEN` personal access token.
+
 To save the routes, dev command, masks for dynamic content, and login state for future
 runs, add a `.ui-diff.json` file. See [`skills/ui-diff/references/config.md`](skills/ui-diff/references/config.md).
 
@@ -122,13 +128,16 @@ skills/ui-diff/
 │   ├── capture.cjs             deterministic screenshots + computed-style snapshots
 │   ├── diff.cjs                pixel diff, changed regions, zoom crops
 │   ├── stylediff.cjs           measured style/layout/copy/contrast changes
+│   ├── figma-export.cjs        export a Figma frame as PNG (REST API, FIGMA_TOKEN)
+│   ├── compare.cjs             design vs implementation: composite, regions, zooms
 │   ├── publish.sh              push images to the assets branch
 │   ├── viewer.cjs              local before/after review page (index.html)
 │   ├── comment.cjs             render the PR markdown
 │   └── post.cjs                create or update the PR comment / description section
 └── references/
     ├── route-mapping.md        changed files → routes, per framework
-    └── config.md               .ui-diff.json options, auth, noise control
+    ├── config.md               .ui-diff.json options, auth, noise control
+    └── figma.md                comparing with a Figma design
 tests/
 ├── selftest.sh                 end-to-end self-test
 ├── check-spec.cjs              Agent Skills spec compliance check
