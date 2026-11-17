@@ -365,7 +365,12 @@ if [ "$FULL" = 1 ]; then
     echo '.card button { background: #16a34a; color: white; border-radius: 999px; padding: 0.9em 1.8em; }' >> src/App.css
     git add -A && commit "green CTA"
     bash "$S/run.sh" > "$TMP/vite.out" 2> "$TMP/vite.err"
-    check "run.sh exits 0" test $? = 0
+    RC=$?
+    check "run.sh exits 0" test $RC = 0
+    if [ $RC != 0 ]; then # show why (CI has no other way to see it)
+      tail -20 "$TMP/vite.err" | sed 's/^/    | /'
+      for f in .ui-diff/*.log; do [ -f "$f" ] && { echo "    | --- $f"; tail -15 "$f" | sed 's/^/    | /'; }; done
+    fi
     expect "$TMP/vite.err" 'has(d, "npm run dev -- --port {port} --strictPort")' "detects the Vite dev command"
     expect "$TMP/vite.err" 'has(d, "reusing installed dependencies")' "reuses node_modules for base (same lockfile)"
     V="$TMP/vite-app/.ui-diff/report"
