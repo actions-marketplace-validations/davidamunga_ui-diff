@@ -53,6 +53,10 @@ make_static_repo() {
 bash "$S/setup.sh" >/dev/null || { echo "tool setup failed"; exit 1; }
 
 # ---------------------------------------------------------------------------------
+section "spec: SKILL.md follows the Agent Skills spec (works across agents)"
+node "$HERE/check-spec.cjs" "$HERE/../skills"
+check "all spec rules pass" test $? = 0
+
 section "unit: description splicing (post.cjs)"
 cd "$TMP"
 node -e '

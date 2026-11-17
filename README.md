@@ -1,9 +1,9 @@
 # ui-diff
 
-A Claude Code skill that shows reviewers what a pull request **looks like**, not just what
+An agent skill that shows reviewers what a pull request **looks like**, not just what
 its code is.
 
-Run it on a branch and Claude will:
+Run it on a branch and your agent will:
 
 1. Work out which pages the PR affects from the changed files (routes, layouts, shared components, CSS/tokens).
 2. Run the app at the **base** and **head** commits side by side, in git worktrees on free ports. Your checkout and your other running servers are untouched.
@@ -15,16 +15,53 @@ Run it on a branch and Claude will:
 
 ## Install
 
-```bash
-# in Claude Code
-/plugin marketplace add <this repo's git URL or local path>
+`ui-diff` is an [Agent Skill](https://agentskills.io): a `SKILL.md` folder plus scripts. Any
+agent that supports the format can use it, including Claude Code, Codex, Cursor, Gemini CLI,
+GitHub Copilot, OpenCode, Goose, Windsurf, Amp, Cline, Roo Code and Kiro.
+
+**Claude Code** (as a plugin):
+```
+/plugin marketplace add davidamunga/ui-diff
 /plugin install ui-diff@ui-diff
 ```
 
-Or copy `skills/ui-diff/` into `~/.claude/skills/` (personal) or `<repo>/.claude/skills/` (shared with a project).
+**Every agent on your machine**, with the installer in this repo:
+```bash
+git clone git@github.com:davidamunga/ui-diff.git && cd ui-diff
+./install.sh                    # links the skill into each detected agent's skills folder
+./install.sh --list             # show agents, paths, and what's installed
+./install.sh --agents codex,cursor
+./install.sh --project ~/Work/my-app   # one project only: my-app/.agents/skills/
+./install.sh --uninstall
+```
+Symlinks are the default, so `git pull` updates every agent at once. Pass `--copy` if you'd
+rather have copies.
 
-Requirements: Node 18+, `git`, and `gh` (logged in). On the first run, Playwright and
-Chromium are installed into `~/.cache/ui-diff`. Your project's dependencies are not changed.
+**Or with the [`skills`](https://skills.sh) CLI** (Node 22.20+):
+```bash
+npx skills add davidamunga/ui-diff            # project-level, asks which agents
+npx skills add davidamunga/ui-diff -g -a codex -a cursor -a gemini-cli -a github-copilot
+```
+
+**Manually:** copy or symlink `skills/ui-diff/` into the agent's skills folder:
+
+| Agent | User-level | Project-level |
+|---|---|---|
+| Claude Code | `~/.claude/skills/` | `.claude/skills/` |
+| Codex, Cline | `~/.agents/skills/` | `.agents/skills/` |
+| Cursor | `~/.cursor/skills/` | `.agents/skills/` |
+| Gemini CLI | `~/.gemini/skills/` | `.agents/skills/` |
+| GitHub Copilot | `~/.copilot/skills/` | `.agents/skills/` |
+| OpenCode | `~/.config/opencode/skills/` | `.agents/skills/` |
+| Goose | `~/.config/goose/skills/` | `.goose/skills/` |
+| Windsurf | `~/.codeium/windsurf/skills/` | `.windsurf/skills/` |
+| Amp | `~/.config/agents/skills/` | `.agents/skills/` |
+
+The repo is private, so teammates need read access to clone or install it.
+
+Requirements: bash, git, Node 18+, and `gh` (logged in) for posting to PRs. On the first run
+Playwright and Chromium are installed into `~/.cache/ui-diff`. Your project's dependencies
+are not changed.
 
 ## Use
 
@@ -46,7 +83,7 @@ the images are pushed to a `ui-diff-assets` branch in the same repo and embedded
 from there. They render inline, and in private repos they're visible to anyone with read access.
 The branch is kept as a single commit, so it doesn't bloat clones. Set `UI_DIFF_PRUNE=1`
 to drop images of closed PRs, or delete the branch at any time. If you can't push to the repo
-(e.g. a PR from a fork), it falls back to manual mode. If you'd rather not have that branch, ask for **manual** mode: Claude
+(e.g. a PR from a fork), it falls back to manual mode. If you'd rather not have that branch, ask for **manual** mode: the agent
 writes the comment and opens the image folder, and you drag the images into GitHub yourself.
 
 ## Development
@@ -67,8 +104,9 @@ touches GitHub. Run it after any change to `skills/ui-diff/scripts/`.
 ## Layout
 
 ```
+install.sh                      install for every detected agent
 skills/ui-diff/
-├── SKILL.md                    the workflow Claude follows
+├── SKILL.md                    the workflow the agent follows
 ├── scripts/
 │   ├── run.sh                  the whole pipeline: worktrees → servers → capture → diffs
 │   ├── setup.sh                one-time toolchain install
@@ -85,6 +123,7 @@ skills/ui-diff/
     └── config.md               .ui-diff.json options, auth, noise control
 tests/
 ├── selftest.sh                 end-to-end self-test
+├── check-spec.cjs              Agent Skills spec compliance check
 ├── expect.cjs                  assertion helper
 └── fixtures/static-site/       base/ + head/ overlay for the demo site
 ```

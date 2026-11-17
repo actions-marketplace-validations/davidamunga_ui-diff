@@ -1,6 +1,10 @@
 ---
 name: ui-diff
 description: Show the visual / UI / UX impact of a pull request. Renders the affected pages of a web app at the base and head commits, pixel-diffs the screenshots, measures exact style changes (colors, spacing, type, contrast), writes a plain-language summary for designers and reviewers, and posts before/after images to the PR as a comment or in the description. Use this whenever someone wants reviewers to *see* a frontend change — "add screenshots to my PR", "what does this PR look like", "visual diff", "before/after", "design review", "did my CSS change break anything", "show the UI changes", "visual regression check" — even if they don't say "UI diff" or "design diff". Works with any web app that runs on a local dev server (React, Next.js, Vue, Nuxt, Svelte, Angular, Astro, plain HTML).
+compatibility: Needs bash, git and Node.js 18+; the GitHub CLI (gh, logged in) to post to PRs; python3 for plain-HTML sites. The first run downloads Playwright + Chromium (~150 MB) into ~/.cache/ui-diff. macOS or Linux.
+metadata:
+  author: davidamunga
+  version: "0.1.0"
 ---
 
 # UI diff
@@ -12,8 +16,9 @@ goes a short summary of what changed for users, backed by measured values.
 The mechanical work is a single script. Your job is the parts that need judgment:
 **which pages to check**, **what the changes mean**, and **where to post**.
 
-`$SKILL` below means this skill's base directory. Everything is written to `.ui-diff/`
-at the repo root, which the script git-ignores locally, so nothing tracked changes.
+`$SKILL` below means the directory that contains this `SKILL.md`. Set it once, e.g.
+`SKILL=/path/to/skills/ui-diff`. Everything is written to `.ui-diff/` at the repo root,
+which the script git-ignores locally, so nothing tracked changes.
 
 ## 1. Context
 
@@ -76,7 +81,9 @@ rerun. Don't skip one side.
 Read `.ui-diff/report/measured.md` first. These are **measured** facts: computed-style
 changes grouped across elements, resized elements, layout shifts, copy changes, and
 **new** WCAG contrast failures. Then open the zoom images (`report/zoom/*__after.png` and `__before.png`)
-and diff overlays with the Read tool to see how those facts look in context. Check
+and diff overlays with whatever file or image viewing tool you have to see how those facts
+look in context. If you can't view images, write the summary from `measured.md` alone and
+say the screenshots weren't reviewed. Check
 `results.json` for `warnings` too: HTTP errors, framework error overlays, uncaught exceptions.
 
 Write `.ui-diff/report/summary.md` for a designer or PM who won't read the code:
