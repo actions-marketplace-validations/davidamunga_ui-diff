@@ -184,7 +184,15 @@ contrast changes, new vs unchanged pages, zero false positives on a non-visual c
 uncommitted-change labelling, publishing to and pruning a local bare remote, the automatic
 summary, the GitHub Action's script (`action/ci.sh`, with a fake PR event and a stub `gh`), failure reporting, and
 that servers, worktrees and unrelated processes are cleaned up or left alone. Nothing
-touches GitHub. Run it after any change to `skills/ui-diff/scripts/`.
+touches GitHub. Run it after any change to `skills/ui-diff/scripts/`. CI runs the full
+tier on Ubuntu and macOS for every push and PR.
+
+`evals/` holds the trigger evals: prompts that should and shouldn't make an agent load the
+skill (see [`evals/README.md`](evals/README.md)).
+
+To release: `scripts/release.sh 0.3.0 [notes.md]` bumps the version in `plugin.json` and
+`SKILL.md`, runs the tests, tags `v0.3.0`, moves `v0` (what `uses: davidamunga/ui-diff@v0`
+follows) and creates the GitHub release.
 
 ## Layout
 
